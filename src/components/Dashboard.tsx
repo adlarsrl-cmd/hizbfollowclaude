@@ -180,7 +180,7 @@ export default function Dashboard() {
         const { activeGroupId } = useAppStore.getState();
         if (!activeGroupId) return;
 
-        // Fetch ALL participants in group (just for counting/ranking)
+        // Fetch ALL participants count (just IDs and active status for counting)
         const { data: allParticipants } = await supabase
           .from('participants')
           .select('id, user_id, active')
@@ -225,7 +225,7 @@ export default function Dashboard() {
     };
 
     fetchRankStats();
-  }, [isMember, user]);
+  }, [isMember, user, participants, entries]);
 
   // Calculate member's rank for the banner (legacy - kept for fallback)
   const myRankInfo = useMemo(() => {
@@ -422,14 +422,14 @@ export default function Dashboard() {
                 Participants récents (cette semaine)
               </h3>
               <div className="space-y-3">
-                {recentTop.length > 0 ? recentTop.map((row, idx) => {
+                {recentTop.length > 0 ? recentTop.map((row: any, idx) => {
                   const medals = ['🥇','🥈','🥉'];
                   return (
-                    <div key={row.id} className="flex items-center justify-between">
+                    <div key={`${row.participant?.id || idx}-top`} className="flex items-center justify-between">
                       <div className="flex items-center">
                         <span className="text-lg mr-2">{medals[idx] || '✅'}</span>
                         <span className="font-medium text-gray-900 dark:text-white">
-                          {row.participant.name}
+                          {row.participant?.name || 'Participant'}
                         </span>
                       </div>
                       <div className="text-right">
@@ -437,7 +437,7 @@ export default function Dashboard() {
                           +{row.delta} hizb
                         </span>
                         <div className="text-xs text-gray-500 dark:text-gray-400">
-                          Semaine du {row.weekLabel}
+                          Semaine du {row.weekLabel || new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}
                         </div>
                       </div>
                     </div>

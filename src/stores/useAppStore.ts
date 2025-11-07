@@ -596,15 +596,38 @@ export const useAppStore = create<AppState>()(
         fetchParticipants: async () => {
           if (!get().enableGroups || !activeGroupId()) return;
 
-          // If user is a member, only fetch their own participants
-          const role = get().currentUserRole;
-          if (role === 'member' || role === 'viewer') {
-            return get().fetchMyParticipants();
-          }
-
           set((state) => ({ loading: { ...state.loading, participants: true } }));
 
           try {
+            // Wait a bit for role to be set if needed
+            let role = get().currentUserRole;
+            
+            // If role not set yet, fetch it
+            if (!role) {
+              const userId = ownerId();
+              const groupId = activeGroupId();
+              
+              if (userId && groupId) {
+                const { data: memberData } = await supabase
+                  .from('group_members')
+                  .select('role')
+                  .eq('group_id', groupId)
+                  .eq('user_id', userId)
+                  .maybeSingle();
+                
+                if (memberData) {
+                  role = memberData.role;
+                  set({ currentUserRole: role });
+                }
+              }
+            }
+
+            // If user is a member/viewer, only fetch their own participants
+            if (role === 'member' || role === 'viewer') {
+              return get().fetchMyParticipants();
+            }
+
+            // For owners/managers, fetch all participants
             const { data, error } = await supabase
               .from('participants')
               .select('*')
