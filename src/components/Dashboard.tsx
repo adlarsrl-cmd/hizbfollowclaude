@@ -18,6 +18,7 @@ import {
 } from 'recharts';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../stores/useAppStore';
+import { supabase } from '../lib/supabase';
 import {
   getWeekKeyTuesday,
   parseWeekKeyTuesday,
@@ -164,9 +165,81 @@ export default function Dashboard() {
     }
   ];
 
-  // Calculate member's rank for the banner
+  // Fetch ALL participants count for member rank (without exposing data)
+  const [allParticipantsStats, setAllParticipantsStats] = React.useState<{
+    totalActive: number;
+    myRank: number;
+    myDelta: number;
+  } | null>(null);
+
+  React.useEffect(() => {
+    if (!isMember || !user) return;
+
+    const fetchRankStats = async () => {
+      try {
+        const { activeGroupId } = useAppStore.getState();
+        if (!activeGroupId) return;
+
+        // Fetch ALL participants in group (just for counting/ranking)
+        const { data: allParticipants } = await supabase
+          .from('participants')
+          .select('id, user_id, active')
+          .eq('group_id', activeGroupId)
+          .eq('active', true);
+
+        if (!allParticipants) return;
+
+        // Fetch ALL entries for ranking calculation
+        const { data: allEntries } = await supabase
+          .from('entries')
+          .select('*')
+          .eq('group_id', activeGroupId);
+
+        if (!allEntries) return;
+
+        // Calculate deltas for everyone
+        const currentWeekKey = getWeekKeyTuesday(new Date());
+        const weekNum = currentWeekKey.split('-W')[1]?.replace('-TUE', '') || '';
+
+        const participantDeltas = allParticipants.map(p => {
+          const deltas = calculateWeeklyDeltas(allEntries, p.id);
+          const delta = deltas.find(d => d.week === weekNum)?.delta ?? 0;
+          return { participant: p, delta };
+        });
+
+        const sorted = participantDeltas
+          .filter(x => x.delta > 0)
+          .sort((a, b) => b.delta - a.delta);
+
+        const myRank = sorted.findIndex(x => x.participant.user_id === user.id);
+        const myDelta = sorted.find(x => x.participant.user_id === user.id)?.delta ?? 0;
+
+        setAllParticipantsStats({
+          totalActive: allParticipants.length,
+          myRank: myRank >= 0 ? myRank + 1 : 0,
+          myDelta
+        });
+      } catch (error) {
+        console.error('Error fetching rank stats:', error);
+      }
+    };
+
+    fetchRankStats();
+  }, [isMember, user]);
+
+  // Calculate member's rank for the banner (legacy - kept for fallback)
   const myRankInfo = useMemo(() => {
     if (!isMember) return null;
+    
+    // Use the fetched stats if available
+    if (allParticipantsStats) {
+      return {
+        rank: allParticipantsStats.myRank,
+        total: allParticipantsStats.totalActive
+      };
+    }
+
+    // Fallback to local calculation
     const sorted = participants
       .map(p => {
         const deltas = calculateWeeklyDeltas(entries, p.id);
@@ -182,7 +255,7 @@ export default function Dashboard() {
     const totalParticipants = sorted.length;
     
     return { rank: myRank + 1, total: totalParticipants };
-  }, [isMember, participants, entries, user]);
+  }, [isMember, participants, entries, user, allParticipantsStats]);
 
   return (
     <>
