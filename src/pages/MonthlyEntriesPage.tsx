@@ -21,6 +21,7 @@ import {
   parseCSV,
 } from '../lib/utils';
 import type { Entry, Participant } from '../types';
+import { HizbPageConverter } from '../components/HizbPageConverter';
 
 interface CellState {
   value: string;            // ce que tape l'utilisateur (peut être "0" ou "")
@@ -588,6 +589,9 @@ export default function MonthlyEntriesPage() {
 
   return (
     <div className="space-y-6">
+      {/* Floating converter */}
+      <HizbPageConverter />
+
       {/* header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>

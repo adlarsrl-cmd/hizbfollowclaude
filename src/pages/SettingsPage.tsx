@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Settings as SettingsIcon,
   Bell,
@@ -8,10 +9,16 @@ import {
   Database,
   Mail,
   Smartphone,
-  User
+  User,
+  Lock,
+  Eye,
+  EyeOff,
+  Trash2
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { useToast } from '../stores/useToast';
+import { supabase } from '../lib/supabase';
+import DeleteAccountConfirmationDialog from '../components/DeleteAccountConfirmationDialog';
 
 export default function SettingsPage() {
   const {
@@ -45,6 +52,26 @@ export default function SettingsPage() {
 
   const [participantName, setParticipantName] = useState('');
   const [isSavingName, setIsSavingName] = useState(false);
+
+  // Password change state
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [showPasswords, setShowPasswords] = useState({
+    current: false,
+    new: false,
+    confirm: false
+  });
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+
+  // Account deletion state
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const navigate = useNavigate();
+  const { deleteAccount } = useAppStore();
 
   useEffect(() => {
     fetchSettings();
@@ -130,6 +157,108 @@ export default function SettingsPage() {
     console.log('Import data functionality');
   };
 
+  const handleChangePassword = async () => {
+    setPasswordError('');
+
+    // Validation
+    if (!passwordData.currentPassword) {
+      setPasswordError('Veuillez entrer votre mot de passe actuel');
+      return;
+    }
+
+    if (passwordData.newPassword.length < 6) {
+      setPasswordError('Le nouveau mot de passe doit contenir au moins 6 caractères');
+      return;
+    }
+
+    if (passwordData.newPassword !== passwordData.confirmPassword) {
+      setPasswordError('Les nouveaux mots de passe ne correspondent pas');
+      return;
+    }
+
+    // Check password strength
+    const hasLowercase = /[a-z]/.test(passwordData.newPassword);
+    const hasUppercase = /[A-Z]/.test(passwordData.newPassword);
+    const hasNumber = /[0-9]/.test(passwordData.newPassword);
+    const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"|,.<>?/~`]/.test(passwordData.newPassword);
+
+    if (!hasLowercase || !hasUppercase || !hasNumber || !hasSpecial) {
+      setPasswordError('Le mot de passe doit contenir au moins une lettre minuscule, une lettre majuscule, un chiffre et un caractère spécial');
+      return;
+    }
+
+    setIsChangingPassword(true);
+
+    try {
+      const user = useAppStore.getState().user;
+      if (!user?.email) {
+        throw new Error('Utilisateur non trouvé');
+      }
+
+      // First, verify current password by signing in
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: passwordData.currentPassword
+      });
+
+      if (signInError) {
+        if (signInError.message.includes('Invalid login credentials')) {
+          throw new Error('Mot de passe actuel incorrect');
+        }
+        throw signInError;
+      }
+
+      // Now update the password
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: passwordData.newPassword
+      });
+
+      if (updateError) {
+        // Simplify error messages
+        let errorMessage = updateError.message;
+        if (errorMessage.includes('Password should contain')) {
+          errorMessage = 'Le mot de passe doit contenir au moins une lettre minuscule, une lettre majuscule, un chiffre et un caractère spécial.';
+        } else if (errorMessage.includes('Error during password storage')) {
+          errorMessage = 'Erreur lors de l\'enregistrement du mot de passe. Veuillez réessayer.';
+        }
+        throw new Error(errorMessage);
+      }
+
+      // Success!
+      success('Mot de passe modifié avec succès !');
+      setPasswordData({
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: ''
+      });
+    } catch (err: any) {
+      const errorMessage = err.message || 'Erreur lors de la modification du mot de passe';
+      setPasswordError(errorMessage);
+      showError(errorMessage);
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    setIsDeletingAccount(true);
+    try {
+      await deleteAccount();
+      success('Compte supprimé avec succès. Toutes vos données ont été supprimées.');
+      // Redirect to login
+      navigate('/');
+      // Force page reload to clear all state after a short delay
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    } catch (err: any) {
+      console.error('Error deleting account:', err);
+      showError(err.message || 'Erreur lors de la suppression du compte');
+      setIsDeletingAccount(false);
+      setShowDeleteDialog(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -186,6 +315,113 @@ export default function SettingsPage() {
               className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
               {isSavingName ? 'Enregistrement...' : 'Enregistrer le profil'}
+            </button>
+          </div>
+        </div>
+
+        {/* Change Password */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+          <div className="flex items-center mb-4">
+            <Lock className="h-5 w-5 text-emerald-600 dark:text-emerald-400 mr-2" />
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Changer le mot de passe</h2>
+          </div>
+
+          <div className="space-y-4">
+            {passwordError && (
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-md text-sm">
+                {passwordError}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Mot de passe actuel
+              </label>
+              <div className="relative">
+                <input
+                  type={showPasswords.current ? 'text' : 'password'}
+                  value={passwordData.currentPassword}
+                  onChange={(e) => setPasswordData(prev => ({ ...prev, currentPassword: e.target.value }))}
+                  className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
+                  placeholder="Entrez votre mot de passe actuel"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswords(prev => ({ ...prev, current: !prev.current }))}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                >
+                  {showPasswords.current ? (
+                    <EyeOff className="h-5 w-5" />
+                  ) : (
+                    <Eye className="h-5 w-5" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Nouveau mot de passe
+              </label>
+              <div className="relative">
+                <input
+                  type={showPasswords.new ? 'text' : 'password'}
+                  value={passwordData.newPassword}
+                  onChange={(e) => setPasswordData(prev => ({ ...prev, newPassword: e.target.value }))}
+                  className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
+                  placeholder="Minimum 6 caractères"
+                  minLength={6}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswords(prev => ({ ...prev, new: !prev.new }))}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                >
+                  {showPasswords.new ? (
+                    <EyeOff className="h-5 w-5" />
+                  ) : (
+                    <Eye className="h-5 w-5" />
+                  )}
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Le mot de passe doit contenir au moins 6 caractères, avec des lettres majuscules, minuscules, chiffres et caractères spéciaux.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Confirmer le nouveau mot de passe
+              </label>
+              <div className="relative">
+                <input
+                  type={showPasswords.confirm ? 'text' : 'password'}
+                  value={passwordData.confirmPassword}
+                  onChange={(e) => setPasswordData(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                  className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
+                  placeholder="Répétez le nouveau mot de passe"
+                  minLength={6}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswords(prev => ({ ...prev, confirm: !prev.confirm }))}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                >
+                  {showPasswords.confirm ? (
+                    <EyeOff className="h-5 w-5" />
+                  ) : (
+                    <Eye className="h-5 w-5" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <button
+              onClick={handleChangePassword}
+              disabled={isChangingPassword || !passwordData.currentPassword || !passwordData.newPassword || !passwordData.confirmPassword}
+              className="w-full px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {isChangingPassword ? 'Modification...' : 'Modifier le mot de passe'}
             </button>
           </div>
         </div>
@@ -429,7 +665,40 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+
+        {/* Delete Account */}
+        <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-red-200 dark:border-red-800">
+          <div className="flex items-center mb-4">
+            <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400 mr-2" />
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Zone de danger</h2>
+          </div>
+          
+          <div className="space-y-4">
+            <div>
+              <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">
+                Une fois votre compte supprimé, toutes vos données seront définitivement perdues. Cette action est irréversible.
+              </p>
+            </div>
+
+            <button
+              onClick={() => setShowDeleteDialog(true)}
+              className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors flex items-center"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Supprimer mon compte
+            </button>
+          </div>
+        </div>
       </div>
+
+      {/* Delete Account Confirmation Dialog */}
+      <DeleteAccountConfirmationDialog
+        isOpen={showDeleteDialog}
+        onClose={() => setShowDeleteDialog(false)}
+        onConfirm={handleDeleteAccount}
+        isDeleting={isDeletingAccount}
+        userEmail={useAppStore.getState().user?.email}
+      />
 
       {/* Save Button */}
       <div className="flex justify-end">

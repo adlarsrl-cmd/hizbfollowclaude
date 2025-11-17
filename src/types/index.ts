@@ -87,8 +87,11 @@ export interface GroupMember {
 export interface UserProfile {
   user_id: string;
   full_name?: string;
+  display_name?: string;
+  email?: string;
   avatar_url?: string;
   locale: string;
+  deleted_at?: string;
 }
 
 export interface GroupInvite {

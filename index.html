@@ -5,6 +5,36 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HizbFollow - PWA complète de suivi Coran</title>
+    <script>
+      // Apply theme immediately to prevent flash of wrong theme
+      (function() {
+        const stored = localStorage.getItem('hizbfollow-storage');
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            const theme = parsed?.state?.theme || 'light';
+            if (theme === 'auto') {
+              const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+              if (prefersDark) {
+                document.documentElement.classList.add('dark');
+              } else {
+                document.documentElement.classList.remove('dark');
+              }
+            } else if (theme === 'dark') {
+              document.documentElement.classList.add('dark');
+            } else {
+              // Light mode: remove dark class
+              document.documentElement.classList.remove('dark');
+            }
+          } catch (e) {
+            document.documentElement.classList.remove('dark');
+          }
+        } else {
+          // Default to light mode
+          document.documentElement.classList.remove('dark');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

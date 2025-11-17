@@ -3,6 +3,7 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { Home, Users, BarChart3, Settings, CreditCard as Edit3, WifiOff, Moon, Sun, Monitor, ChevronDown } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import GroupSelector from './GroupSelector';
+import EmailVerificationBanner from './EmailVerificationBanner';
 
 export default function Layout() {
   const location = useLocation();
@@ -63,13 +64,19 @@ export default function Layout() {
   // Apply theme to document
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.remove('light', 'dark');
     
     if (theme === 'auto') {
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      root.classList.add(prefersDark ? 'dark' : 'light');
+      if (prefersDark) {
+        root.classList.add('dark');
+      } else {
+        root.classList.remove('dark');
+      }
+    } else if (theme === 'dark') {
+      root.classList.add('dark');
     } else {
-      root.classList.add(theme);
+      // Light mode: remove dark class
+      root.classList.remove('dark');
     }
   }, [theme]);
 
@@ -113,6 +120,9 @@ export default function Layout() {
   }
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Email Verification Banner */}
+      <EmailVerificationBanner />
+      
       {/* Header */}
       <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

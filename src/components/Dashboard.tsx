@@ -51,7 +51,7 @@ export default function Dashboard() {
     // participants actifs
     const active = participants.filter(p => p.active);
 
-    // semaine courante alignée mardi
+    // semaine er courante alignée mardi
     const now = new Date();
     const currentWeekKey = getWeekKeyTuesday(now);                 // ex: 2025-W43-TUE
     const currentTuesday = parseWeekKeyTuesday(currentWeekKey);    // Date du mardi

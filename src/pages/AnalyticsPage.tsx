@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   BarChart3,
   Users,
@@ -25,7 +25,6 @@ import {
   ReferenceLine
 } from 'recharts';
 import { useAppStore } from '../stores/useAppStore';
-import { EditHistoryButton } from '../components/analytics/EditHistoryButton';
 import {
   getWeekKeyTuesday,
   toCSV,
@@ -56,6 +55,7 @@ export default function AnalyticsPage() {
     const now = new Date();
     return `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`;
   });
+  const [comparisonMonth, setComparisonMonth] = useState<string>('');
 
   const [weeklyReadingsMode, setWeeklyReadingsMode] = useState<'month' | 'weeks'>('month');
   const [weeklyReadingsPeriod, setWeeklyReadingsPeriod] = useState<2 | 4 | 8 | 12>(8);
@@ -63,28 +63,18 @@ export default function AnalyticsPage() {
   const [comparisonMode, setComparisonMode] = useState(false);
   const [weeklyPeriod, setWeeklyPeriod] = useState<4 | 6 | 8 | 12 | 16>(8);
 
-  // plage pour tableau mensuel
-  const [monthlyFromDate, setMonthlyFromDate] = useState(() => {
-    const now = new Date();
-    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-    return `${sixMonthsAgo.getFullYear()}-${(sixMonthsAgo.getMonth() + 1).toString().padStart(2, '0')}`;
-  });
+  // plage pour tableau mensuel - will be initialized after entries are loaded
+  const [monthlyFromDate, setMonthlyFromDate] = useState<string>('');
   const [monthlyToDate, setMonthlyToDate] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`;
   });
+  const hasInitializedMonthlyFromDate = useRef(false);
 
   useEffect(() => {
     fetchParticipants();
     fetchEntries();
   }, []);
-
-  // init sélection quand les participants arrivent
-  useEffect(() => {
-    if (participants.length > 0 && selectedParticipantIds.length === 0) {
-      setSelectedParticipantIds(participants.filter(p => p.active).map(p => p.id));
-    }
-  }, [participants]);
 
   // indexations pour perfs basées sur entries
   const { byParticipant, monthsSet } = useMemo(() => {
@@ -115,6 +105,46 @@ export default function AnalyticsPage() {
     return Array.from(monthsSet).sort().reverse();
   }, [monthsSet]);
 
+  // First month with entries (for initialization)
+  const firstMonthWithEntries = useMemo(() => {
+    if (monthsSet.size === 0) return null;
+    const sortedMonths = Array.from(monthsSet).sort();
+    return sortedMonths[0];
+  }, [monthsSet]);
+
+  // init sélection quand les participants arrivent
+  useEffect(() => {
+    if (participants.length > 0 && selectedParticipantIds.length === 0) {
+      setSelectedParticipantIds(participants.filter(p => p.active).map(p => p.id));
+    }
+  }, [participants]);
+
+  // Initialize monthlyFromDate to first month with entries
+  useEffect(() => {
+    if (entries.length > 0 && firstMonthWithEntries) {
+      // Always set to first month if:
+      // 1. Not initialized yet, OR
+      // 2. Current date is empty, OR
+      // 3. Current date is not the first month (user might have changed it, but default should be first)
+      if (!hasInitializedMonthlyFromDate.current || !monthlyFromDate || monthlyFromDate !== firstMonthWithEntries) {
+        setMonthlyFromDate(firstMonthWithEntries);
+        hasInitializedMonthlyFromDate.current = true;
+      }
+    } else if (entries.length === 0 && !hasInitializedMonthlyFromDate.current) {
+      // If no entries yet, default to current month
+      const now = new Date();
+      setMonthlyFromDate(`${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`);
+      hasInitializedMonthlyFromDate.current = true;
+    }
+  }, [entries.length, firstMonthWithEntries, monthlyFromDate]);
+
+  // Reset comparison month when comparison mode is disabled
+  useEffect(() => {
+    if (!comparisonMode && comparisonMonth) {
+      setComparisonMonth('');
+    }
+  }, [comparisonMode, comparisonMonth]);
+
   // handlers sélection participants
   const handleSelectAll = () => {
     setSelectedParticipantIds(participants.filter(p => p.active).map(p => p.id));
@@ -133,21 +163,25 @@ export default function AnalyticsPage() {
     return filteredParticipants
       .map(participant => {
         const average = calculateMonthlyAverages(entries, participant.id, selectedMonth);
+        const comparisonAverage = comparisonMode && comparisonMonth 
+          ? calculateMonthlyAverages(entries, participant.id, comparisonMonth)
+          : null;
 
         return {
           name: participant.name,
           participant_id: participant.id,
           average: Math.round(average * 10) / 10,
+          comparisonAverage: comparisonAverage !== null ? Math.round(comparisonAverage * 10) / 10 : null,
           total: Math.round(average * 4.33 * 10) / 10, // Approximate monthly total
           weeks: 4 // Approximate weeks per month
         };
       })
       .sort((a, b) => b.average - a.average);
-  }, [filteredParticipants, entries, selectedMonth]);
+  }, [filteredParticipants, entries, selectedMonth, comparisonMode, comparisonMonth]);
 
   // données hebdo pour graph (par mois OU dernières X semaines)
   const weeklyData = useMemo(() => {
-    const buildForWeeks = (weeks: { weekKey: string; date: string; fullDate: Date }[]) => {
+    const buildForWeeks = (weeks: { weekKey: string; date: string; fullDate: Date; monthLabel?: string }[]) => {
       const chartData = filteredParticipants.map(participant => {
         const row: any = { name: participant.name, participant_id: participant.id };
         const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id);
@@ -155,22 +189,18 @@ export default function AnalyticsPage() {
 
         weeks.forEach(week => {
           const weekNumber = week.weekKey.split('-W')[1]?.replace('-TUE', '') || '';
-          row[week.date] = deltaMap.get(weekNumber) || 0;
+          const dataKey = week.monthLabel ? `${week.date}_${week.monthLabel}` : week.date;
+          row[dataKey] = deltaMap.get(weekNumber) || 0;
         });
         return row;
       });
       return { chartData, weeks };
     };
 
-    if (weeklyReadingsMode === 'month') {
-      if (!selectedMonth) return { chartData: [], weeks: [] as any[] };
-      const [year, month] = selectedMonth.split('-').map(Number);
-
-      // construit la liste des mardis du mois sélectionné (aligné mardi)
+    const getWeeksForMonth = (year: number, month: number, monthLabel?: string) => {
       const first = new Date(year, month - 1, 1);
       const last = new Date(year, month, 0);
       const cur = new Date(first);
-      // calage semaine ISO (lundi) puis mardi
       cur.setDate(cur.getDate() - cur.getDay() + 1);
       const weeks: any[] = [];
       while (cur <= last) {
@@ -180,10 +210,41 @@ export default function AnalyticsPage() {
         weeks.push({
           weekKey,
           date: tue.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
-          fullDate: tue
+          fullDate: tue,
+          monthLabel
         });
         cur.setDate(cur.getDate() + 7);
       }
+      return weeks;
+    };
+
+    if (weeklyReadingsMode === 'month') {
+      if (!selectedMonth) return { chartData: [], weeks: [] as any[] };
+      const [year, month] = selectedMonth.split('-').map(Number);
+      
+      let weeks = getWeeksForMonth(year, month);
+      
+      // If comparison mode is enabled and comparison month is selected, merge weeks from both months
+      if (comparisonMode && comparisonMonth) {
+        const [compYear, compMonth] = comparisonMonth.split('-').map(Number);
+        const compWeeks = getWeeksForMonth(compYear, compMonth, 'comp');
+        
+        // Merge weeks, alternating between months
+        const mergedWeeks: any[] = [];
+        const maxWeeks = Math.max(weeks.length, compWeeks.length);
+        
+        for (let i = 0; i < maxWeeks; i++) {
+          if (i < weeks.length) {
+            mergedWeeks.push(weeks[i]);
+          }
+          if (i < compWeeks.length) {
+            mergedWeeks.push(compWeeks[i]);
+          }
+        }
+        
+        weeks = mergedWeeks;
+      }
+      
       return buildForWeeks(weeks);
     } else {
       const now = new Date();
@@ -192,7 +253,6 @@ export default function AnalyticsPage() {
         const anchor = new Date(now);
         anchor.setDate(anchor.getDate() - i * 7);
         const weekKey = getWeekKeyTuesday(anchor);
-        // ✅ mardi réel correspondant à la clé
         const tue = parseWeekKeyTuesday(weekKey);
 
         weeks.push({
@@ -203,7 +263,7 @@ export default function AnalyticsPage() {
       }
       return buildForWeeks(weeks);
     }
-  }, [filteredParticipants, entries, selectedMonth, weeklyReadingsMode, weeklyReadingsPeriod]);
+  }, [filteredParticipants, entries, selectedMonth, weeklyReadingsMode, weeklyReadingsPeriod, comparisonMode, comparisonMonth]);
 
   // tableau hebdo (timeline/heatmap/table)
   const weeklyTableData = useMemo(() => {
@@ -241,6 +301,9 @@ export default function AnalyticsPage() {
 
   // tableau mensuel (moyennes)
   const monthlyTableData = useMemo(() => {
+    // If monthlyFromDate is not set yet, return empty array
+    if (!monthlyFromDate) return [];
+    
     const fromDate = new Date(monthlyFromDate + '-01');
     const toDate = new Date(monthlyToDate + '-01');
 
@@ -415,7 +478,7 @@ export default function AnalyticsPage() {
                       </div>
                     ))}
                     <div className="w-16 p-2 text-center font-semibold text-gray-900 dark:text-white text-xs">Moy.</div>
-                    <div className="w-24 p-2 text-center font-semibold text-gray-900 dark:text-white text-xs">Tendance</div>
+                    <div className="w-24 p-2 text-center font-semibold text-gray-900 dark:text-white text-xs">Hizb en retard</div>
                   </div>
 
                   {weeklyTableData.map(({ participant, data, weeks }) => (
@@ -454,13 +517,19 @@ export default function AnalyticsPage() {
                       </div>
                       <div className="w-24 p-2 text-center text-xs flex items-center justify-center">
                         {(() => {
+                          const target = data.target || 7;
                           const values = weeks.map((w: any) => data[w.date] || 0);
-                          const mid = Math.floor(values.length / 2);
-                          const firstAvg = values.slice(0, mid).reduce((a, b) => a + b, 0) / Math.max(1, mid);
-                          const secondAvg = values.slice(mid).reduce((a, b) => a + b, 0) / Math.max(1, values.length - mid);
-                          if (secondAvg > firstAvg * 1.1) return <span className="text-green-600 dark:text-green-400 font-semibold">↗️ Hausse</span>;
-                          if (secondAvg < firstAvg * 0.9) return <span className="text-red-600 dark:text-red-400 font-semibold">↘️ Baisse</span>;
-                          return <span className="text-gray-600 dark:text-gray-400 font-semibold">➡️ Stable</span>;
+                          const totalActual = values.reduce((sum: number, val: number) => sum + val, 0);
+                          const totalExpected = target * weeks.length;
+                          const difference = totalActual - totalExpected;
+                          
+                          if (difference > 0) {
+                            return <span className="text-green-600 dark:text-green-400 font-semibold">+{difference}</span>;
+                          } else if (difference < 0) {
+                            return <span className="text-red-600 dark:text-red-400 font-semibold">{difference}</span>;
+                          } else {
+                            return <span className="text-gray-600 dark:text-gray-400 font-semibold">0</span>;
+                          }
                         })()}
                       </div>
                     </div>
@@ -529,7 +598,7 @@ export default function AnalyticsPage() {
                       </div>
                     );
                   })}
-                  <div className="w-24 p-2 text-center font-semibold text-gray-900 dark:text-white text-xs">Tendance</div>
+                  <div className="w-24 p-2 text-center font-semibold text-gray-900 dark:text-white text-xs">Hizb en retard</div>
                 </div>
 
                 {monthlyTableData.map(({ participant, data, months }) => (
@@ -563,14 +632,23 @@ export default function AnalyticsPage() {
                     })}
                     <div className="w-24 p-2 text-center text-xs flex items-center justify-center">
                       {(() => {
+                        const target = data.target || 7;
                         const values = months.map((m: string) => data[m] || 0);
-                        if (values.length < 2) return <span className="text-gray-400 font-semibold">-</span>;
-                        const mid = Math.floor(values.length / 2);
-                        const firstAvg = values.slice(0, mid).reduce((a, b) => a + b, 0) / Math.max(1, mid);
-                        const secondAvg = values.slice(mid).reduce((a, b) => a + b, 0) / Math.max(1, values.length - mid);
-                        if (secondAvg > firstAvg * 1.1) return <span className="text-green-600 dark:text-green-400 font-semibold">↗️ Hausse</span>;
-                        if (secondAvg < firstAvg * 0.9) return <span className="text-red-600 dark:text-red-400 font-semibold">↘️ Baisse</span>;
-                        return <span className="text-gray-600 dark:text-gray-400 font-semibold">➡️ Stable</span>;
+                        // Calculate total hizb en retard: (average - target) × 4.33 weeks per month × number of months
+                        // Simplified: sum of (monthly_avg - target) × 4.33 for each month
+                        const weeksPerMonth = 4.33; // Average weeks per month
+                        const totalDifference = values.reduce((sum: number, monthlyAvg: number) => {
+                          return sum + ((monthlyAvg - target) * weeksPerMonth);
+                        }, 0);
+                        const roundedDifference = Math.round(totalDifference);
+                        
+                        if (roundedDifference > 0) {
+                          return <span className="text-green-600 dark:text-green-400 font-semibold">+{roundedDifference}</span>;
+                        } else if (roundedDifference < 0) {
+                          return <span className="text-red-600 dark:text-red-400 font-semibold">{roundedDifference}</span>;
+                        } else {
+                          return <span className="text-gray-600 dark:text-gray-400 font-semibold">0</span>;
+                        }
                       })()}
                     </div>
                   </div>
@@ -603,18 +681,50 @@ export default function AnalyticsPage() {
         <p className="text-gray-600 dark:text-gray-400 mb-4">Moyenne hebdomadaire de lecture par participant</p>
 
         <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Mois à analyser</label>
-          <select
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-          >
-            {availableMonths.map(m => {
-              const [y, mNum] = m.split('-').map(Number);
-              const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-              return <option key={m} value={m}>{monthName}</option>;
-            })}
-          </select>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                {comparisonMode ? 'Mois 1 (principal)' : 'Mois à analyser'}
+              </label>
+              <select
+                value={selectedMonth}
+                onChange={(e) => {
+                  setSelectedMonth(e.target.value);
+                  // Reset comparison month if it's the same as selected month
+                  if (e.target.value === comparisonMonth) {
+                    setComparisonMonth('');
+                  }
+                }}
+                className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
+              >
+                {availableMonths.map(m => {
+                  const [y, mNum] = m.split('-').map(Number);
+                  const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+                  return <option key={m} value={m}>{monthName}</option>;
+                })}
+              </select>
+            </div>
+            
+            {comparisonMode && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Mois 2 (comparaison)</label>
+                <select
+                  value={comparisonMonth || ''}
+                  onChange={(e) => setComparisonMonth(e.target.value)}
+                  className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
+                >
+                  <option value="">Sélectionner un mois</option>
+                  {availableMonths
+                    .filter(m => m !== selectedMonth)
+                    .map(m => {
+                      const [y, mNum] = m.split('-').map(Number);
+                      const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+                      return <option key={m} value={m}>{monthName}</option>;
+                    })}
+                </select>
+              </div>
+            )}
+          </div>
         </div>
 
         {monthlyData.length === 0 ? (
@@ -632,11 +742,33 @@ export default function AnalyticsPage() {
                 <ReferenceLine y={7} stroke="red" strokeDasharray="4 4" label="7" />
                 <ReferenceLine y={14} stroke="red" strokeDasharray="4 4" label="14" />
                 <Tooltip
-                  formatter={(value: any) => [`${value} hizb/semaine`, 'Moyenne']}
+                  formatter={(value: any, name: any) => {
+                    if (comparisonMode && comparisonMonth) {
+                      return [`${value} hizb/semaine`, name];
+                    }
+                    return [`${value} hizb/semaine`, 'Moyenne'];
+                  }}
                   labelStyle={{ color: '#374151' }}
                   contentStyle={{ backgroundColor: '#f9fafb', border: '1px solid #d1d5db', borderRadius: '6px' }}
                 />
-                <Bar dataKey="average" fill="#059669" radius={[4, 4, 0, 0]} name="Moyenne hebdomadaire" />
+                <Legend />
+                <Bar 
+                  dataKey="average" 
+                  fill="#059669" 
+                  radius={[4, 4, 0, 0]} 
+                  name={comparisonMode && comparisonMonth 
+                    ? `${new Date(parseInt(selectedMonth.split('-')[0]), parseInt(selectedMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })}`
+                    : "Moyenne hebdomadaire"
+                  } 
+                />
+                {comparisonMode && comparisonMonth && (
+                  <Bar 
+                    dataKey="comparisonAverage" 
+                    fill="#0891b2" 
+                    radius={[4, 4, 0, 0]} 
+                    name={`${new Date(parseInt(comparisonMonth.split('-')[0]), parseInt(comparisonMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })}`}
+                  />
+                )}
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -694,19 +826,48 @@ export default function AnalyticsPage() {
 
             {/* Contrôles conditionnels */}
             {weeklyReadingsMode === 'month' ? (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Mois à analyser</label>
-                <select
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
-                  className="border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-                >
-                  {availableMonths.map(m => {
-                    const [y, mNum] = m.split('-').map(Number);
-                    const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-                    return <option key={m} value={m}>{monthName}</option>;
-                  })}
-                </select>
+              <div className={comparisonMode ? 'grid grid-cols-1 md:grid-cols-2 gap-4 w-full' : ''}>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    {comparisonMode ? 'Mois 1 (principal)' : 'Mois à analyser'}
+                  </label>
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => {
+                      setSelectedMonth(e.target.value);
+                      // Reset comparison month if it's the same as selected month
+                      if (e.target.value === comparisonMonth) {
+                        setComparisonMonth('');
+                      }
+                    }}
+                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
+                  >
+                    {availableMonths.map(m => {
+                      const [y, mNum] = m.split('-').map(Number);
+                      const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+                      return <option key={m} value={m}>{monthName}</option>;
+                    })}
+                  </select>
+                </div>
+                {comparisonMode && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Mois 2 (comparaison)</label>
+                    <select
+                      value={comparisonMonth || ''}
+                      onChange={(e) => setComparisonMonth(e.target.value)}
+                      className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
+                    >
+                      <option value="">Sélectionner un mois</option>
+                      {availableMonths
+                        .filter(m => m !== selectedMonth)
+                        .map(m => {
+                          const [y, mNum] = m.split('-').map(Number);
+                          const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+                          return <option key={m} value={m}>{monthName}</option>;
+                        })}
+                    </select>
+                  </div>
+                )}
               </div>
             ) : (
               <div>
@@ -727,7 +888,9 @@ export default function AnalyticsPage() {
 
           <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
             {weeklyReadingsMode === 'month'
-              ? `Affichage des semaines du mois sélectionné`
+              ? comparisonMode && comparisonMonth
+                ? `Comparaison des semaines entre ${new Date(parseInt(selectedMonth.split('-')[0]), parseInt(selectedMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })} et ${new Date(parseInt(comparisonMonth.split('-')[0]), parseInt(comparisonMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`
+                : `Affichage des semaines du mois sélectionné`
               : `Affichage des ${weeklyReadingsPeriod} dernières semaines`}
           </div>
         </div>
@@ -753,15 +916,25 @@ export default function AnalyticsPage() {
                   contentStyle={{ backgroundColor: '#f9fafb', border: '1px solid #d1d5db', borderRadius: '6px' }}
                 />
                 <Legend />
-                {weeklyData.weeks?.map((w: any, index: number) => (
+                {weeklyData.weeks?.map((w: any, index: number) => {
+                  const dataKey = w.monthLabel ? `${w.date}_${w.monthLabel}` : w.date;
+                  const monthName = w.monthLabel === 'comp' && comparisonMonth
+                    ? `${new Date(parseInt(comparisonMonth.split('-')[0]), parseInt(comparisonMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'short' })} ${w.date}`
+                    : !w.monthLabel && comparisonMode && comparisonMonth
+                    ? `${new Date(parseInt(selectedMonth.split('-')[0]), parseInt(selectedMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'short' })} ${w.date}`
+                    : `Semaine du ${w.date}`;
+                  const barColor = w.monthLabel === 'comp' ? '#0891b2' : colors[index % colors.length];
+                  
+                  return (
                   <Bar
-                    key={w.weekKey}
-                    dataKey={w.date}
-                    fill={colors[index % colors.length]}
-                    name={`Semaine du ${w.date}`}
+                    key={w.weekKey + (w.monthLabel || '')}
+                    dataKey={dataKey}
+                    fill={barColor}
+                    name={monthName}
                     radius={[2, 2, 0, 0]}
                   />
-                ))}
+                  );
+                })}
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -796,10 +969,30 @@ export default function AnalyticsPage() {
             const bestVal = bestWeek.delta;
             const bestDate = bestWeek.week ? `S${bestWeek.week}` : null;
 
-            // régularité
+            // série actuelle (current streak)
             const target = participant.weekly_target_hizb || 7;
-            const weeksWithTarget = weeklyDeltas.filter(w => w.delta >= target).length;
-            const regularity = weeklyDeltas.length ? Math.round((weeksWithTarget / weeklyDeltas.length) * 100) : 0;
+            let currentStreak = 0;
+            // Start from most recent week and count backwards
+            for (let i = weeklyDeltas.length - 1; i >= 0; i--) {
+              if (weeklyDeltas[i].delta >= target) {
+                currentStreak++;
+              } else {
+                break; // Stop at first week below target
+              }
+            }
+            const bestStreak = (() => {
+              let maxStreak = 0;
+              let tempStreak = 0;
+              for (const w of weeklyDeltas) {
+                if (w.delta >= target) {
+                  tempStreak++;
+                  maxStreak = Math.max(maxStreak, tempStreak);
+                } else {
+                  tempStreak = 0;
+                }
+              }
+              return maxStreak;
+            })();
 
             // calcul hizb en retard
             const hizbRetard = calculateHizbRetard(entries, participant.id, target);
@@ -816,9 +1009,8 @@ export default function AnalyticsPage() {
 
             return (
               <div key={participant.id} className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-4">
+                <div className="mb-4">
                   <h3 className="font-medium text-gray-900 dark:text-white">{participant.name}</h3>
-                  <EditHistoryButton participantId={participant.id} />
                 </div>
 
                 <div className="space-y-3">
@@ -855,14 +1047,17 @@ export default function AnalyticsPage() {
                     </span>
                   </div>
 
-                  {/* Régularité */}
+                  {/* Série actuelle */}
                   <div className="flex items-center justify-between">
                     <div className="flex items-center">
                       <Zap className="h-4 w-4 text-orange-600 dark:text-orange-400 mr-2" />
-                      <span className="text-sm text-gray-600 dark:text-gray-400">Régularité:</span>
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Série actuelle:</span>
                     </div>
                     <span className="text-sm font-medium text-gray-900 dark:text-white">
-                      {regularity}%
+                      {currentStreak > 0 ? `${currentStreak} semaine${currentStreak > 1 ? 's' : ''} 🔥` : '0 semaine'}
+                      {bestStreak > currentStreak && (
+                        <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">(Record: {bestStreak})</span>
+                      )}
                     </span>
                   </div>
 

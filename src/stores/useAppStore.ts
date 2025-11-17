@@ -28,6 +28,7 @@ interface AppState {
   // Auth
   user: User | null;
   isAuthenticated: boolean;
+  isEmailVerified: boolean;
 
   // Groups
   activeGroupId: string | null;
@@ -73,6 +74,9 @@ interface AppState {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  resendVerificationEmail: () => Promise<void>;
+  checkEmailVerification: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 
   // Group actions
   fetchMyGroups: () => Promise<void>;
@@ -135,7 +139,7 @@ export const useAppStore = create<AppState>()(
         enableInvites: true,
         enablePersonalEntry: true,
 
-        theme: 'auto',
+        theme: 'light',
         viewMode: 'table',
         currentUnit: 'hizb',
         isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
@@ -190,22 +194,28 @@ export const useAppStore = create<AppState>()(
 
           if (error) throw error;
 
+          // Check email verification status
+          const isEmailVerified = data.user?.email_confirmed_at !== null && data.user?.email_confirmed_at !== undefined;
+
           set({
             user: data.user,
-            isAuthenticated: true
+            isAuthenticated: true,
+            isEmailVerified: isEmailVerified
           });
 
-          // Fetch initial data
-          await Promise.all([
-            get().fetchMyGroups(),
-            get().fetchUserProfile(),
-          ]);
-
-          // Auto-select group if user has only one
-          const { groups } = get();
-          if (groups.length === 1) {
-            get().setActiveGroup(groups[0].id);
-          }
+          // Fetch initial data in background - don't block login
+          Promise.all([
+            get().fetchMyGroups().catch(err => console.warn('Groups fetch error:', err)),
+            get().fetchUserProfile().catch(err => console.warn('Profile fetch error:', err)),
+          ]).then(() => {
+            // Auto-select group if user has only one
+            const { groups } = get();
+            if (groups.length === 1) {
+              get().setActiveGroup(groups[0].id).catch(err => console.warn('Set active group error:', err));
+            }
+          }).catch(() => {
+            // Ignore all errors - login should succeed regardless
+          });
         },
 
         signUp: async (email: string, password: string) => {
@@ -216,11 +226,15 @@ export const useAppStore = create<AppState>()(
 
           if (error) throw error;
 
+          // Check if email verification is required
+          const isEmailVerified = data.user?.email_confirmed_at !== null && data.user?.email_confirmed_at !== undefined;
+
           // Si confirmation email OFF, on aura session
           if (data.user && data.session) {
             set({
               user: data.user,
-              isAuthenticated: true
+              isAuthenticated: true,
+              isEmailVerified: isEmailVerified
             });
 
             // Create user profile
@@ -234,6 +248,14 @@ export const useAppStore = create<AppState>()(
 
             // Settings par défaut pour le nouvel utilisateur
             // Will be created when user joins/creates first group
+          } else if (data.user && !isEmailVerified) {
+            // User created but needs to verify email
+            // Don't set authenticated, but store user for verification banner
+            set({
+              user: data.user,
+              isAuthenticated: false,
+              isEmailVerified: false
+            });
           }
         },
 
@@ -242,6 +264,7 @@ export const useAppStore = create<AppState>()(
           set({
             user: null,
             isAuthenticated: false,
+            isEmailVerified: false,
             activeGroupId: null,
             groups: [],
             currentUserRole: null,
@@ -251,6 +274,217 @@ export const useAppStore = create<AppState>()(
             entries: [],
             settings: null
           });
+        },
+
+        resendVerificationEmail: async () => {
+          const user = get().user;
+          if (!user?.email) {
+            throw new Error('Aucun email trouvé');
+          }
+
+          const { error } = await supabase.auth.resend({
+            type: 'signup',
+            email: user.email
+          });
+
+          if (error) {
+            // If email verification is disabled, provide helpful message
+            if (error.message?.includes('disabled') || error.message?.includes('not enabled')) {
+              throw new Error('La vérification d\'email est désactivée dans Supabase. Activez-la dans Settings → Authentication → Email Templates.');
+            }
+            throw error;
+          }
+        },
+
+        checkEmailVerification: async () => {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            const isEmailVerified = user.email_confirmed_at !== null && user.email_confirmed_at !== undefined;
+            set({ 
+              user,
+              isEmailVerified 
+            });
+          }
+        },
+
+        deleteAccount: async () => {
+          const userId = ownerId();
+          if (!userId) {
+            throw new Error('Aucun utilisateur trouvé');
+          }
+
+          // Delete all user data from tables with owner_id or user_id
+          // Note: Some tables have ON DELETE CASCADE, but we delete explicitly for clarity and error handling
+          
+          const errors: string[] = [];
+          
+          try {
+            // Order matters: delete child records before parent records to avoid foreign key issues
+
+            // 1. Remove user from groups they're members of (but not owner) - do this first
+            const { error: groupMembersError } = await supabase
+              .from('group_members')
+              .delete()
+              .eq('user_id', userId);
+            if (groupMembersError && !groupMembersError.message.includes('does not exist')) {
+              errors.push(`group_members: ${groupMembersError.message}`);
+            }
+
+            // 2. Get groups owned by user (before deleting them)
+            const { data: userGroups } = await supabase
+              .from('groups')
+              .select('id')
+              .eq('owner_id', userId);
+
+            // 3. Delete group settings for groups owned by user (if table exists)
+            if (userGroups && userGroups.length > 0) {
+              const groupIds = userGroups.map(g => g.id);
+              const { error: groupSettingsError } = await supabase
+                .from('group_settings')
+                .delete()
+                .in('group_id', groupIds);
+              // Ignore if table doesn't exist
+              if (groupSettingsError && !groupSettingsError.message.includes('does not exist')) {
+                errors.push(`group_settings: ${groupSettingsError.message}`);
+              }
+            }
+
+            // 4. Delete entries (owned by user)
+            const { error: entriesError } = await supabase
+              .from('entries')
+              .delete()
+              .eq('owner_id', userId);
+            if (entriesError) errors.push(`entries: ${entriesError.message}`);
+
+            // 5. Delete weekly snapshots
+            const { error: snapshotsError } = await supabase
+              .from('weekly_snapshots')
+              .delete()
+              .eq('owner_id', userId);
+            if (snapshotsError) errors.push(`weekly_snapshots: ${snapshotsError.message}`);
+
+            // 6. Delete participants (this may cascade delete entries, but we already deleted them)
+            const { error: participantsError } = await supabase
+              .from('participants')
+              .delete()
+              .eq('owner_id', userId);
+            if (participantsError) errors.push(`participants: ${participantsError.message}`);
+
+            // 7. Delete groups owned by user (this will cascade delete group_members, participants, entries)
+            const { error: groupsError } = await supabase
+              .from('groups')
+              .delete()
+              .eq('owner_id', userId);
+            if (groupsError) errors.push(`groups: ${groupsError.message}`);
+
+            // 8. Delete invitations created by user (if table exists)
+            const { error: invitationsError } = await supabase
+              .from('invitations')
+              .delete()
+              .eq('owner_id', userId);
+            if (invitationsError && !invitationsError.message.includes('does not exist')) {
+              errors.push(`invitations: ${invitationsError.message}`);
+            }
+
+            // 9. Delete app settings
+            const { error: settingsError } = await supabase
+              .from('app_settings')
+              .delete()
+              .eq('owner_id', userId);
+            if (settingsError) errors.push(`app_settings: ${settingsError.message}`);
+
+            // 10. Delete notification subscriptions (if table exists)
+            const { error: notificationsError } = await supabase
+              .from('notifications_subscriptions')
+              .delete()
+              .eq('owner_id', userId);
+            if (notificationsError && !notificationsError.message.includes('does not exist')) {
+              errors.push(`notifications_subscriptions: ${notificationsError.message}`);
+            }
+
+            // 11. Delete user links (if table exists)
+            const { error: userLinksError } = await supabase
+              .from('user_links')
+              .delete()
+              .eq('user_id', userId);
+            if (userLinksError && !userLinksError.message.includes('does not exist')) {
+              errors.push(`user_links: ${userLinksError.message}`);
+            }
+
+            // 12. Delete user roles (if table exists)
+            const { error: userRolesError } = await supabase
+              .from('user_roles')
+              .delete()
+              .eq('user_id', userId);
+            if (userRolesError && !userRolesError.message.includes('does not exist')) {
+              errors.push(`user_roles: ${userRolesError.message}`);
+            }
+
+            // 13. Mark account as deleted (soft delete) instead of deleting profile
+            // This prevents the user from logging in again
+            const { error: softDeleteError } = await supabase
+              .from('user_profiles')
+              .update({ deleted_at: new Date().toISOString() })
+              .eq('user_id', userId);
+            if (softDeleteError && !softDeleteError.message.includes('does not exist')) {
+              errors.push(`user_profiles soft delete: ${softDeleteError.message}`);
+            }
+
+            // 14. Delete password change tracking (if table exists)
+            const { error: passwordChangeError } = await supabase
+              .from('user_password_change_required')
+              .delete()
+              .eq('user_id', userId);
+            if (passwordChangeError && !passwordChangeError.message.includes('does not exist')) {
+              errors.push(`user_password_change_required: ${passwordChangeError.message}`);
+            }
+
+            // 15. Delete pending user creations created by this user (if table exists)
+            const { error: pendingError } = await supabase
+              .from('pending_user_creations')
+              .delete()
+              .eq('created_by', userId);
+            if (pendingError && !pendingError.message.includes('does not exist')) {
+              errors.push(`pending_user_creations: ${pendingError.message}`);
+            }
+
+            // If we have critical errors (not just missing tables), throw
+            const criticalErrors = errors.filter(e => !e.includes('does not exist'));
+            if (criticalErrors.length > 0) {
+              console.error('Critical errors during account deletion:', criticalErrors);
+              throw new Error(`Erreurs lors de la suppression: ${criticalErrors.join(', ')}`);
+            }
+
+            // 16. Clear all local storage
+            localStorage.clear();
+
+            // 17. Sign out from Supabase (this clears the session)
+            await supabase.auth.signOut();
+
+            // 18. Reset store state
+            set({
+              user: null,
+              isAuthenticated: false,
+              isEmailVerified: false,
+              activeGroupId: null,
+              groups: [],
+              currentUserRole: null,
+              groupMembers: [],
+              userProfile: null,
+              participants: [],
+              entries: [],
+              settings: null
+            });
+
+            // Note: auth.users deletion requires admin privileges
+            // For full GDPR compliance, create a Supabase Edge Function with admin API:
+            // supabase.functions.invoke('delete-user', { body: { userId } })
+            // The auth user will remain in auth.users but with no associated data
+            // This is acceptable for GDPR as all personal data is deleted
+          } catch (error) {
+            console.error('Error during account deletion:', error);
+            throw error;
+          }
         },
 
         // Group actions
@@ -263,6 +497,10 @@ export const useAppStore = create<AppState>()(
               console.error('No user ID found');
               return;
             }
+
+            // TEMPORARILY DISABLED - Rotate expired invite codes
+            // Will re-enable after login is fixed
+            // supabase.rpc('rotate_expired_invite_codes').catch(() => {});
 
             const { data, error } = await supabase
               .from('groups')
@@ -1066,14 +1304,17 @@ if (typeof window !== 'undefined') {
 // Auth listener
 supabase.auth.onAuthStateChange((_event, session) => {
   if (session?.user) {
+    const isEmailVerified = session.user.email_confirmed_at !== null && session.user.email_confirmed_at !== undefined;
     useAppStore.setState({
       user: session.user,
-      isAuthenticated: true
+      isAuthenticated: true,
+      isEmailVerified: isEmailVerified
     });
   } else {
     useAppStore.setState({
       user: null,
       isAuthenticated: false,
+      isEmailVerified: false,
       participants: [],
       entries: [],
       settings: null

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, CreditCard as Edit3, Save, X, CreditCard as Edit2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Save, X, Edit } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { getWeekKeyTuesday, parseWeekKeyTuesday, tuesdayNoonISO, hasRealEntries, getLastRealEntry, toHizb, toPages, detectNewKhatma } from '../lib/utils';
 import type { Participant, UnitType } from '../types';
@@ -271,37 +271,39 @@ export default function EntryPage() {
                   </td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{p.cycle_number}</td>
                   <td className="px-4 py-3 text-right">
-                    <div className="flex gap-2 justify-end">
-                      <button onClick={() => openManualEntry(p.id)} className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">
-                        <Edit3 className="h-4 w-4" /> Saisir
-                      </button>
-                      {(() => {
-                        const tuesday = parseWeekKeyTuesday(selectedWeekKey);
-                        const weekStart = new Date(tuesday);
-                        weekStart.setDate(tuesday.getDate() - 1);
-                        weekStart.setHours(0, 0, 0, 0);
-                        
-                        const weekEnd = new Date(tuesday);
-                        weekEnd.setDate(tuesday.getDate() + 5);
-                        weekEnd.setHours(23, 59, 59, 999);
-                        
-                        const weekEntry = entries
-                          .filter(e => e.participant_id === p.id)
-                          .find(e => {
-                            const entryDate = new Date(e.recorded_at);
-                            return entryDate >= weekStart && entryDate <= weekEnd;
-                          });
-                        
-                        return weekEntry ? (
-                          <button 
-                            onClick={() => openManualEntry(p.id)} 
-                            className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700"
-                          >
-                            <Edit2 className="h-4 w-4" /> Modifier
-                          </button>
-                        ) : null;
-                      })()}
-                    </div>
+                    {(() => {
+                      const tuesday = parseWeekKeyTuesday(selectedWeekKey);
+                      const weekStart = new Date(tuesday);
+                      weekStart.setDate(tuesday.getDate() - 1);
+                      weekStart.setHours(0, 0, 0, 0);
+                      
+                      const weekEnd = new Date(tuesday);
+                      weekEnd.setDate(tuesday.getDate() + 5);
+                      weekEnd.setHours(23, 59, 59, 999);
+                      
+                      const weekEntry = entries
+                        .filter(e => e.participant_id === p.id)
+                        .find(e => {
+                          const entryDate = new Date(e.recorded_at);
+                          return entryDate >= weekStart && entryDate <= weekEnd;
+                        });
+                      
+                      return weekEntry ? (
+                        <button 
+                          onClick={() => openManualEntry(p.id)} 
+                          className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700"
+                        >
+                          <Edit className="h-4 w-4" /> Modifier
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => openManualEntry(p.id)} 
+                          className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700"
+                        >
+                          <Plus className="h-4 w-4" /> Saisir
+                        </button>
+                      );
+                    })()}
                   </td>
                 </tr>
               ))}
@@ -313,45 +315,47 @@ export default function EntryPage() {
       {/* Modal saisie */}
       {showManualEntry && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Saisie manuelle</h3>
-              <button onClick={() => setShowManualEntry(false)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setShowManualEntry(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             <div className="space-y-4">
-              <div className="text-sm text-gray-700 dark:text-gray-300">
+              <div className="text-base font-medium text-gray-900 dark:text-white">
                 {participants.find(p => p.id === manualEntryData.participantId)?.name}
               </div>
 
               <div>
-                <label className="block text-sm mb-1 text-gray-600 dark:text-gray-400">Position ({currentUnit})</label>
+                <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-200">Position ({currentUnit})</label>
                 <input
                   type="number"
                   min={1}
                   max={currentUnit === 'hizb' ? 60 : 604}
                   value={manualEntryData.value}
                   onChange={(e) => setManualEntryData(prev => ({ ...prev, value: parseInt(e.target.value) || 1 }))}
-                  className="w-full rounded-md border px-3 py-2 dark:bg-gray-700 dark:text-white"
+                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-900 dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                 />
               </div>
 
-              <div className="flex items-center gap-3">
-                <label className="inline-flex items-center gap-2 text-sm">
+              <div className="flex items-center gap-4">
+                <label className="inline-flex items-center gap-2 text-sm text-gray-900 dark:text-gray-100 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={manualEntryData.isStartingPoint}
                     onChange={(e) => setManualEntryData(prev => ({ ...prev, isStartingPoint: e.target.checked, isRestart: false }))}
+                    className="w-4 h-4 text-emerald-600 border-gray-300 dark:border-gray-600 rounded focus:ring-emerald-500"
                   />
                   📍 Point de départ
                 </label>
-                <label className="inline-flex items-center gap-2 text-sm">
+                <label className="inline-flex items-center gap-2 text-sm text-gray-900 dark:text-gray-100 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={manualEntryData.isRestart}
                     onChange={(e) => setManualEntryData(prev => ({ ...prev, isRestart: e.target.checked, isStartingPoint: false }))}
+                    className="w-4 h-4 text-emerald-600 border-gray-300 dark:border-gray-600 rounded focus:ring-emerald-500"
                   />
                   🔁 Redémarrage
                 </label>
@@ -359,9 +363,9 @@ export default function EntryPage() {
             </div>
 
             <div className="flex justify-end gap-2 mt-6">
-              <button onClick={() => setShowManualEntry(false)} className="px-3 py-2 rounded-md bg-gray-100 dark:bg-gray-700">Annuler</button>
-              <button onClick={handleManualEntrySave} className="px-3 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">
-                <Save className="h-4 w-4 inline mr-1" /> Sauvegarder
+              <button onClick={() => setShowManualEntry(false)} className="px-4 py-2 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">Annuler</button>
+              <button onClick={handleManualEntrySave} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">
+                <Save className="h-4 w-4" /> Sauvegarder
               </button>
             </div>
           </div>

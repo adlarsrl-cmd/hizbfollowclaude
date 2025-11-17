@@ -18,14 +18,23 @@ const GroupsPage = React.lazy(() => import('./pages/GroupsPage'));
 const PersonalEntryPage = React.lazy(() => import('./pages/PersonalEntryPage'));
 const GroupSettingsPage = React.lazy(() => import('./pages/GroupSettingsPage'));
 const JoinGroupPage = React.lazy(() => import('./pages/JoinGroupPage'));
+const ForgotPasswordPage = React.lazy(() => import('./pages/ForgotPasswordPage'));
+const ResetPasswordPage = React.lazy(() => import('./pages/ResetPasswordPage'));
 
 function App() {
-  const { isAuthenticated, user, enableGroups, fetchMyGroups } = useAppStore();
+  const { isAuthenticated, user, enableGroups, fetchMyGroups, checkEmailVerification } = useAppStore();
   const refresh = useAuth((s) => s.refresh);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Check email verification status on app load
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      checkEmailVerification();
+    }
+  }, [isAuthenticated, user, checkEmailVerification]);
 
   // Load groups on app start if groups are enabled
   useEffect(() => {
@@ -43,7 +52,35 @@ function App() {
   }, [user]);
 
   if (!isAuthenticated) {
-    return <Login />;
+    return (
+      <ErrorBoundary>
+        <Router>
+          <div className="App">
+            <ToastContainer />
+            <Routes>
+              <Route path="/" element={<Login />} />
+              <Route
+                path="forgot-password"
+                element={
+                  <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                    <ForgotPasswordPage />
+                  </React.Suspense>
+                }
+              />
+              <Route
+                path="reset-password"
+                element={
+                  <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                    <ResetPasswordPage />
+                  </React.Suspense>
+                }
+              />
+              <Route path="*" element={<Login />} />
+            </Routes>
+          </div>
+        </Router>
+      </ErrorBoundary>
+    );
   }
 
   return (
@@ -52,8 +89,17 @@ function App() {
         <div className="App">
           <ToastContainer />
           <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Dashboard />} />
+            {/* Reset password page - accessible even when authenticated (Supabase auto-logs in on reset link) */}
+            <Route
+              path="/reset-password"
+              element={
+                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                  <ResetPasswordPage />
+                </React.Suspense>
+              }
+            />
+            <Route path="/" element={<Layout />}>
+              <Route index element={<Dashboard />} />
             <Route
               path="groups"
               element={

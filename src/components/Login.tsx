@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { BookOpen, Eye, EyeOff } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useAppStore } from '../stores/useAppStore';
 
 export default function Login() {
@@ -10,6 +11,7 @@ export default function Login() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [signupSuccess, setSignupSuccess] = useState(false);
 
   const { signIn, signUp } = useAppStore();
 
@@ -27,11 +29,19 @@ export default function Login() {
     try {
       if (isSignUp) {
         await signUp(email, password);
+        // Check if user was created but needs email verification
+        const { isEmailVerified: verified, isAuthenticated } = useAppStore.getState();
+        if (!verified && !isAuthenticated) {
+          // User created but needs to verify email
+          setSignupSuccess(true);
+          setError('');
+        }
       } else {
         await signIn(email, password);
       }
     } catch (error: any) {
       setError(error.message || (isSignUp ? 'Erreur lors de la création du compte' : 'Erreur de connexion'));
+      setSignupSuccess(false);
     } finally {
       setLoading(false);
     }
@@ -42,6 +52,7 @@ export default function Login() {
     setError('');
     setPassword('');
     setConfirmPassword('');
+    setSignupSuccess(false);
   };
 
   return (
@@ -64,6 +75,12 @@ export default function Login() {
 
         {/* Login Form */}
         <form onSubmit={handleSubmit} className="space-y-6">
+          {signupSuccess && (
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 px-4 py-3 rounded-md">
+              <p className="font-medium mb-1">Compte créé avec succès !</p>
+              <p className="text-sm">Un email de vérification a été envoyé à {email}. Veuillez vérifier votre boîte de réception et cliquer sur le lien pour activer votre compte.</p>
+            </div>
+          )}
           {error && (
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-md">
               {error}
@@ -137,6 +154,18 @@ export default function Login() {
             {loading ? (isSignUp ? 'Création...' : 'Connexion...') : (isSignUp ? 'Créer le compte' : 'Se connecter')}
           </button>
         </form>
+
+        {/* Forgot password link (only on login, not signup) */}
+        {!isSignUp && (
+          <div className="mt-4 text-center">
+            <Link
+              to="/forgot-password"
+              className="text-sm text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300"
+            >
+              Mot de passe oublié ?
+            </Link>
+          </div>
+        )}
 
         {/* Toggle between sign in and sign up */}
         <div className="mt-6 text-center">
