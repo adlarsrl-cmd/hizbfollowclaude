@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Home, Users, BarChart3, Settings, CreditCard as Edit3, WifiOff, Moon, Sun, Monitor, ChevronDown } from 'lucide-react';
+import { Home, Users, BarChart3, Settings, CreditCard as Edit3, WifiOff, Moon, Sun, Monitor, ChevronDown, LogOut } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import GroupSelector from './GroupSelector';
 import EmailVerificationBanner from './EmailVerificationBanner';
@@ -19,14 +19,15 @@ export default function Layout() {
   } = useAppStore();
 
   const [showEntriesDropdown, setShowEntriesDropdown] = React.useState(false);
+  const [showProfileDropdown, setShowProfileDropdown] = React.useState(false);
   const dropdownRef = React.useRef<HTMLDivElement>(null);
+  const profileDropdownRef = React.useRef<HTMLDivElement>(null);
 
-  // Filter navigation based on role
+  // Filter navigation based on role (removed Settings from nav - now in profile dropdown)
   const baseNavigation = [
     { name: 'Tableau de bord', href: '/', icon: Home, allowedRoles: ['owner', 'manager', 'member', 'viewer'] },
     { name: 'Participants', href: '/participants', icon: Users, allowedRoles: ['owner', 'manager'] },
     { name: 'Analytics', href: '/analytics', icon: BarChart3, allowedRoles: ['owner', 'manager', 'member', 'viewer'] },
-    { name: 'Paramètres', href: '/settings', icon: Settings, allowedRoles: ['owner', 'manager', 'member', 'viewer'] },
   ];
 
   const { currentUserRole } = useAppStore();
@@ -80,11 +81,14 @@ export default function Layout() {
     }
   }, [theme]);
 
-  // Close dropdown when clicking outside
+  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setShowEntriesDropdown(false);
+      }
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(event.target as Node)) {
+        setShowProfileDropdown(false);
       }
     };
 
@@ -160,21 +164,62 @@ export default function Layout() {
               <button
                 onClick={toggleTheme}
                 className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                title={`Mode: ${theme === 'light' ? 'Clair' : theme === 'dark' ? 'Sombre' : 'Auto'}`}
               >
                 <ThemeIcon className="h-5 w-5" />
               </button>
 
               {user && (
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm text-gray-700 dark:text-gray-300">
-                    {user.email}
-                  </span>
+                <div className="relative" ref={profileDropdownRef}>
                   <button
-                    onClick={() => signOut()}
-                    className="text-sm text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                    onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                    className="flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                   >
-                    Déconnexion
+                    <div className="h-8 w-8 rounded-full bg-emerald-600 flex items-center justify-center text-white font-medium">
+                      {user.email?.charAt(0).toUpperCase()}
+                    </div>
+                    <span className="text-sm text-gray-700 dark:text-gray-300 hidden md:block">
+                      {user.email}
+                    </span>
+                    <ChevronDown className={`h-4 w-4 text-gray-500 dark:text-gray-400 transition-transform ${showProfileDropdown ? 'rotate-180' : ''}`} />
                   </button>
+
+                  {showProfileDropdown && (
+                    <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50">
+                      {/* User info */}
+                      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">
+                          {user.email}
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          {currentUserRole === 'owner' ? 'Propriétaire' : 
+                           currentUserRole === 'manager' ? 'Gestionnaire' :
+                           currentUserRole === 'member' ? 'Membre' : 'Observateur'}
+                        </p>
+                      </div>
+
+                      {/* Menu items */}
+                      <Link
+                        to="/settings"
+                        onClick={() => setShowProfileDropdown(false)}
+                        className="flex items-center px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                      >
+                        <Settings className="h-4 w-4 mr-3" />
+                        Paramètres
+                      </Link>
+
+                      <button
+                        onClick={() => {
+                          setShowProfileDropdown(false);
+                          signOut();
+                        }}
+                        className="w-full flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                      >
+                        <LogOut className="h-4 w-4 mr-3" />
+                        Déconnexion
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
