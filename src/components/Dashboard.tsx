@@ -276,29 +276,34 @@ export default function Dashboard() {
         )}
 
         {/* Welcome */}
-        <div className="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-lg p-6 text-white">
-          <h1 className="text-2xl font-bold mb-2">Bienvenue sur HizbFollow</h1>
-          <p className="text-emerald-100">
-            {isMember 
-              ? "Suivez votre progression personnelle dans la lecture du Saint Coran"
-              : "Suivez votre progression et celle de votre groupe dans la lecture du Saint Coran"
-            }
-          </p>
+        <div className="relative overflow-hidden bg-gradient-to-br from-emerald-600 to-teal-700 rounded-3xl p-8 text-white shadow-xl shadow-emerald-500/20">
+          <div className="absolute top-0 right-0 -mt-4 -mr-4 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
+          <div className="absolute bottom-0 left-0 -mb-4 -ml-4 w-24 h-24 bg-black/10 rounded-full blur-xl"></div>
+          
+          <div className="relative z-10">
+            <h1 className="text-3xl font-bold mb-3 tracking-tight">Bienvenue sur HizbFollow</h1>
+            <p className="text-emerald-100 text-lg max-w-2xl font-light">
+              {isMember 
+                ? "Suivez votre progression personnelle dans la lecture du Saint Coran"
+                : "Suivez votre progression et celle de votre groupe dans la lecture du Saint Coran"
+              }
+            </p>
+          </div>
         </div>
 
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {statCards.map((stat) => (
-            <div key={stat.name} className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+            <div key={stat.name} className="glass-panel rounded-2xl p-6 card-hover">
               <div className="flex items-center">
-                <div className={`p-2 rounded-md ${stat.bgColor}`}>
+                <div className={`p-3 rounded-xl ${stat.bgColor}`}>
                   <stat.icon className={`h-6 w-6 ${stat.color}`} />
                 </div>
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                  <p className="text-sm font-medium text-slate-600 dark:text-slate-400">
                     {stat.name}
                   </p>
-                  <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">
                     {stat.value}
                   </p>
                 </div>
@@ -310,10 +315,12 @@ export default function Dashboard() {
         {/* Charts and Quick Actions */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Weekly Progress Chart */}
-          <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              <BarChart3 className="inline h-5 w-5 mr-2" />
-              Progression cette semaine (hizb)
+          <div className="lg:col-span-2 glass-panel rounded-2xl p-6">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-6 flex items-center">
+              <div className="p-2 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg mr-3">
+                <BarChart3 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              Progression cette semaine
             </h3>
 
             {weeklyProgressData.length === 0 ? (
@@ -385,43 +392,49 @@ export default function Dashboard() {
           {/* Quick Actions & Top Participants */}
           <div className="space-y-6">
             {/* Quick Actions */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            <div className="glass-panel rounded-2xl p-6">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-6">
                 Actions rapides
               </h3>
               <div className="space-y-3">
                 {currentUserRole !== 'member' && (
                   <Link
                     to="/entry"
-                    className="flex items-center p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-colors"
+                    className="flex items-center p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-900/10 hover:border-emerald-200 dark:hover:border-emerald-800 border border-transparent transition-all group"
                   >
-                    <Calendar className="h-5 w-5 text-emerald-600 dark:text-emerald-400 mr-3" />
-                    <span className="text-emerald-700 dark:text-emerald-300">Saisie hebdomadaire</span>
+                    <div className="p-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm group-hover:scale-110 transition-transform">
+                      <Calendar className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                    <span className="ml-3 font-medium text-slate-700 dark:text-slate-200 group-hover:text-emerald-700 dark:group-hover:text-emerald-300">Saisie hebdomadaire</span>
                   </Link>
                 )}
                 <Link
                   to="/monthly"
-                  className="flex items-center p-3 bg-teal-50 dark:bg-teal-900/20 rounded-lg hover:bg-teal-100 dark:hover:bg-teal-900/30 transition-colors"
+                  className="flex items-center p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-teal-50 dark:hover:bg-teal-900/10 hover:border-teal-200 dark:hover:border-teal-800 border border-transparent transition-all group"
                 >
-                  <Target className="h-5 w-5 text-teal-600 dark:text-teal-400 mr-3" />
-                  <span className="text-teal-700 dark:text-teal-300">Saisie mensuelle</span>
+                  <div className="p-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm group-hover:scale-110 transition-transform">
+                    <Target className="h-5 w-5 text-teal-600 dark:text-teal-400" />
+                  </div>
+                  <span className="ml-3 font-medium text-slate-700 dark:text-slate-200 group-hover:text-teal-700 dark:group-hover:text-teal-300">Saisie mensuelle</span>
                 </Link>
                 <Link
                   to="/analytics"
-                  className="flex items-center p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors"
+                  className="flex items-center p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-purple-50 dark:hover:bg-purple-900/10 hover:border-purple-200 dark:hover:border-purple-800 border border-transparent transition-all group"
                 >
-                  <BarChart3 className="h-5 w-5 text-purple-600 dark:text-purple-400 mr-3" />
-                  <span className="text-purple-700 dark:text-purple-300">Voir analytics</span>
+                  <div className="p-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm group-hover:scale-110 transition-transform">
+                    <BarChart3 className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                  </div>
+                  <span className="ml-3 font-medium text-slate-700 dark:text-slate-200 group-hover:text-purple-700 dark:group-hover:text-purple-300">Voir analytics</span>
                 </Link>
               </div>
             </div>
 
             {/* Top Participants (semaine) */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                Participants récents (cette semaine)
+            <div className="glass-panel rounded-2xl p-6">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-6">
+                Participants récents
               </h3>
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {recentTop.length > 0 ? recentTop.map((row: any, idx) => {
                   const medals = ['🥇','🥈','🥉'];
                   return (

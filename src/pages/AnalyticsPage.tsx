@@ -11,7 +11,8 @@ import {
   Zap,
   TrendingDown,
   TrendingUp,
-  CheckCircle
+  CheckCircle,
+  Loader2
 } from 'lucide-react';
 import {
   BarChart,
@@ -25,6 +26,7 @@ import {
   ReferenceLine
 } from 'recharts';
 import { useAppStore } from '../stores/useAppStore';
+import { Skeleton } from '../components/ui/Skeleton';
 import {
   getWeekKeyTuesday,
   toCSV,
@@ -40,8 +42,11 @@ export default function AnalyticsPage() {
     entries,
     currentUnit,
     fetchParticipants,
-    fetchEntries
+    fetchEntries,
+    loading
   } = useAppStore();
+
+  const isLoading = loading.participants || loading.entries;
 
   // état sélection participants
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
@@ -391,17 +396,17 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Sélection participants */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            <Users className="inline h-5 w-5 mr-2" />
+      <div className="glass-panel rounded-2xl p-6 shadow-sm">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center">
+            <Users className="h-5 w-5 text-emerald-600 dark:text-emerald-400 mr-2" />
             Sélection des participants
           </h2>
           <div className="flex gap-2">
-            <button onClick={handleSelectAll} className="px-3 py-1 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition-colors text-sm">
+            <button onClick={handleSelectAll} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm font-medium shadow-sm hover:shadow-md">
               Tout sélectionner
             </button>
-            <button onClick={handleResetAll} className="px-3 py-1 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors text-sm">
+            <button onClick={handleResetAll} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors text-sm font-medium">
               Tout désélectionner
             </button>
           </div>
@@ -412,10 +417,10 @@ export default function AnalyticsPage() {
             <button
               key={p.id}
               onClick={() => toggleParticipant(p.id)}
-              className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
                 selectedParticipantIds.includes(p.id)
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/20 transform scale-105'
+                  : 'bg-slate-100 dark:bg-slate-800/50 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
               }`}
             >
               {p.name}
@@ -423,30 +428,36 @@ export default function AnalyticsPage() {
           ))}
         </div>
 
-        <div className="mt-3 text-sm text-gray-600 dark:text-gray-400">
+        <div className="mt-4 text-xs font-medium text-slate-500 dark:text-slate-400 flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
           {selectedParticipantIds.length} participant(s) sélectionné(s) sur {participants.filter(p => p.active).length}
         </div>
       </div>
 
       {/* Tableau hebdo (timeline/heatmap/table) */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between mb-4">
+      <div className="glass-panel rounded-2xl p-6 shadow-sm">
+        <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">📊 Évolution par semaine</h2>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <div className="p-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
+                <BarChart3 className="h-4 w-4" />
+              </div>
+              Évolution par semaine
+            </h2>
             <button
               onClick={() => setShowWeeklyTable(!showWeeklyTable)}
-              className="flex items-center px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
+              className="flex items-center px-3 py-1.5 bg-slate-100 dark:bg-slate-800/50 text-slate-600 dark:text-slate-400 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-xs font-medium"
             >
-              {showWeeklyTable ? <EyeOff className="h-4 w-4 mr-1" /> : <Eye className="h-4 w-4 mr-1" />}
+              {showWeeklyTable ? <EyeOff className="h-3.5 w-3.5 mr-1.5" /> : <Eye className="h-3.5 w-3.5 mr-1.5" />}
               {showWeeklyTable ? 'Masquer' : 'Afficher'}
             </button>
           </div>
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600 dark:text-gray-400">Période:</label>
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium text-slate-600 dark:text-slate-400">Période:</label>
             <select
               value={weeklyPeriod}
               onChange={(e) => setWeeklyPeriod(Number(e.target.value) as any)}
-              className="border border-gray-300 dark:border-gray-600 rounded-md px-3 py-1 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
+              className="bg-slate-50 dark:bg-slate-800 border-none rounded-lg px-3 py-1.5 text-sm font-medium focus:ring-2 focus:ring-emerald-500 text-slate-900 dark:text-white"
             >
               <option value={4}>4 semaines</option>
               <option value={6}>6 semaines</option>
@@ -457,61 +468,76 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {showWeeklyTable && (
+        {isLoading ? (
+          <div className="space-y-4">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="flex gap-4">
+                <Skeleton className="h-12 w-44" />
+                <Skeleton className="h-12 flex-1" />
+              </div>
+            ))}
+          </div>
+        ) : showWeeklyTable && (
           <>
             {/* Heatmap colorée avec tendances */}
             <div className="mb-8">
-              <div className="flex items-center gap-4 mb-4 text-sm">
-                <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Objectif atteint</span></div>
-                <div className="flex items-center gap-2"><div className="w-4 h-4 bg-yellow-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Progression moyenne</span></div>
-                <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Faible progression</span></div>
+              <div className="flex items-center gap-4 mb-4 text-xs font-medium">
+                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-emerald-500 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Objectif atteint</span></div>
+                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-amber-400 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Moyen</span></div>
+                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-500 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Faible</span></div>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto pb-2">
                 <div className="inline-block min-w-full">
-                  <div className="flex mb-3 bg-gray-50 dark:bg-gray-900 rounded-lg p-2">
-                    <div className="w-40 p-2 font-semibold text-gray-900 dark:text-white">Participant</div>
-                    <div className="w-16 p-2 text-center font-semibold text-gray-900 dark:text-white text-xs">Obj.</div>
+                  <div className="flex mb-3 bg-slate-50/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-xl p-2 border border-slate-100 dark:border-slate-700/50 sticky top-0 z-10">
+                    <div className="w-44 p-2 font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">Participant</div>
+                    <div className="w-16 p-2 text-center font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">Obj.</div>
                     {weeklyTableData[0]?.weeks.map((w: any) => (
-                      <div key={w.weekKey} className="w-14 p-2 text-center font-semibold text-gray-900 dark:text-white text-xs">
-                        {w.date}
+                      <div key={w.weekKey} className="w-16 p-2 text-center font-bold text-xs text-slate-500 dark:text-slate-400">
+                        <div className="text-emerald-600 dark:text-emerald-400">W{w.weekKey.split('-W')[1]?.replace('-TUE', '')}</div>
+                        <div className="text-[10px] font-normal opacity-70">{w.date.split('/')[0]}/{w.date.split('/')[1]}</div>
                       </div>
                     ))}
-                    <div className="w-16 p-2 text-center font-semibold text-gray-900 dark:text-white text-xs">Moy.</div>
-                    <div className="w-24 p-2 text-center font-semibold text-gray-900 dark:text-white text-xs">Hizb en retard</div>
+                    <div className="w-16 p-2 text-center font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">Moy.</div>
+                    <div className="w-24 p-2 text-center font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">Retard</div>
                   </div>
 
                   {weeklyTableData.map(({ participant, data, weeks }) => (
-                    <div key={participant.id} className="flex mb-2 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg p-1 transition-colors">
-                      <div className="w-40 p-2 font-medium text-gray-900 dark:text-white truncate flex items-center">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-r from-emerald-400 to-emerald-600 flex items-center justify-center text-white text-xs font-bold mr-3">
+                    <div key={participant.id} className="flex mb-2 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 rounded-xl p-1 transition-all duration-200 group">
+                      <div className="w-44 p-2 font-bold text-sm text-slate-900 dark:text-white truncate flex items-center">
+                        <div className="w-8 h-8 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-300 text-xs font-bold mr-3 shadow-sm">
                           {participant.name.charAt(0)}
                         </div>
                         {participant.name}
                       </div>
-                      <div className="w-16 p-2 text-center text-xs bg-blue-100 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 rounded-md flex items-center justify-center font-semibold">
-                        {data.target}
+                      <div className="w-16 p-2 flex items-center justify-center">
+                        <div className="text-center text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg px-2 py-1 font-bold">
+                          {data.target}
+                        </div>
                       </div>
                       {weeks.map((w: any) => {
                         const value = data[w.date] || 0;
                         const cls =
-                          value >= data.target ? 'bg-green-500 text-white' :
-                          value >= data.target * 0.5 ? 'bg-yellow-500 text-white' : 'bg-red-500 text-white';
+                          value >= data.target ? 'bg-emerald-500 text-white shadow-emerald-500/30' :
+                          value >= data.target * 0.5 ? 'bg-amber-400 text-white shadow-amber-400/30' : 'bg-rose-500 text-white shadow-rose-500/30';
                         return (
-                          <div key={w.weekKey} className="w-14 p-1">
-                            <div className={`${cls} rounded-lg text-center text-xs font-bold py-2 relative group shadow-sm hover:shadow-md transition-shadow`}>
+                          <div key={w.weekKey} className="w-16 p-1 flex items-center justify-center">
+                            <div className={`${cls} w-full rounded-lg text-center text-xs font-bold py-1.5 relative group/tooltip shadow-md transition-all hover:scale-110`}>
                               {value}
-                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 shadow-lg">
-                                <div className="font-semibold">{w.date}</div>
-                                <div>{value} hizb {value >= data.target ? '🟢' : value >= data.target * 0.5 ? '🟡' : '🔴'}</div>
-                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-xl opacity-0 group-hover/tooltip:opacity-100 transition-opacity whitespace-nowrap z-20 shadow-xl pointer-events-none">
+                                <div className="font-bold">{w.date}</div>
+                                <div className="flex items-center gap-1 mt-1">
+                                  {value} hizb 
+                                  {value >= data.target ? '✨' : value >= data.target * 0.5 ? '⚠️' : '🚨'}
+                                </div>
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"></div>
                               </div>
                             </div>
                           </div>
                         );
                       })}
-                      <div className="w-16 p-2 text-center text-xs font-semibold text-gray-900 dark:text-white flex items-center justify-center">
-                        <div className="bg-gray-100 dark:bg-gray-700 rounded-md px-2 py-1">
+                      <div className="w-16 p-2 text-center text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-center">
+                        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 shadow-sm">
                           {(weeks.reduce((s: number, w: any) => s + (data[w.date] || 0), 0) / Math.max(1, weeks.length)).toFixed(1)}
                         </div>
                       </div>
@@ -524,11 +550,11 @@ export default function AnalyticsPage() {
                           const difference = totalActual - totalExpected;
                           
                           if (difference > 0) {
-                            return <span className="text-green-600 dark:text-green-400 font-semibold">+{difference}</span>;
+                            return <span className="text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-lg">+{difference}</span>;
                           } else if (difference < 0) {
-                            return <span className="text-red-600 dark:text-red-400 font-semibold">{difference}</span>;
+                            return <span className="text-rose-600 dark:text-rose-400 font-bold bg-rose-50 dark:bg-rose-900/20 px-2 py-1 rounded-lg">{difference}</span>;
                           } else {
-                            return <span className="text-gray-600 dark:text-gray-400 font-semibold">0</span>;
+                            return <span className="text-slate-400 font-bold">—</span>;
                           }
                         })()}
                       </div>
@@ -576,7 +602,16 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {showMonthlyTable && (
+        {isLoading ? (
+          <div className="space-y-4">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="flex gap-4">
+                <Skeleton className="h-10 w-40" />
+                <Skeleton className="h-10 flex-1" />
+              </div>
+            ))}
+          </div>
+        ) : showMonthlyTable && (
           <>
             <div className="flex items-center gap-4 mb-4 text-sm">
               <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Objectif atteint</span></div>
@@ -727,7 +762,11 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {monthlyData.length === 0 ? (
+        {isLoading ? (
+          <div className="h-80 w-full">
+            <Skeleton className="h-full w-full rounded-lg" />
+          </div>
+        ) : monthlyData.length === 0 ? (
           <div className="text-center py-8">
             <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
             <p className="text-gray-600 dark:text-gray-400">Aucune donnée disponible pour ce mois</p>
@@ -895,7 +934,11 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {weeklyData.chartData?.length === 0 ? (
+        {isLoading ? (
+          <div className="h-80 w-full">
+            <Skeleton className="h-full w-full rounded-lg" />
+          </div>
+        ) : weeklyData.chartData?.length === 0 ? (
           <div className="text-center py-8">
             <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-4" />
             <p className="text-gray-600 dark:text-gray-400">Aucune donnée hebdomadaire disponible</p>
@@ -942,12 +985,34 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Analyse individuelle */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="flex items-center mb-4">
-          <Users className="h-5 w-5 text-purple-600 dark:text-purple-400 mr-2" />
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Analyse individuelle</h2>
+      <div className="glass-panel rounded-2xl p-6">
+        <div className="flex items-center mb-6">
+          <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg text-purple-600 dark:text-purple-400 mr-3">
+            <Users className="h-5 w-5" />
+          </div>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white">Analyse individuelle</h2>
         </div>
 
+        {isLoading ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="glass-panel rounded-2xl p-5 border border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-3 mb-4">
+                  <Skeleton className="w-10 h-10 rounded-full" />
+                  <div className="space-y-2">
+                    <Skeleton className="h-5 w-32" />
+                    <Skeleton className="h-3 w-24" />
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <Skeleton className="h-10 w-full rounded-lg" />
+                  <Skeleton className="h-10 w-full rounded-lg" />
+                  <Skeleton className="h-10 w-full rounded-lg" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
           {filteredParticipants.map((participant) => {
             // cumul réel = somme des deltas (toutes semaines)
@@ -1008,96 +1073,101 @@ export default function AnalyticsPage() {
             }
 
             return (
-              <div key={participant.id} className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
-                <div className="mb-4">
-                  <h3 className="font-medium text-gray-900 dark:text-white">{participant.name}</h3>
+              <div key={participant.id} className="bg-white dark:bg-slate-800/50 rounded-2xl p-5 border border-slate-200 dark:border-slate-700 hover:shadow-lg hover:border-emerald-200 dark:hover:border-emerald-800 transition-all duration-300 group">
+                <div className="mb-4 flex items-center gap-3 pb-3 border-b border-slate-100 dark:border-slate-700">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 font-bold shadow-sm">
+                    {participant.name.charAt(0)}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 dark:text-white text-lg">{participant.name}</h3>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">Obj: {target} hizb/sem</div>
+                  </div>
                 </div>
 
                 <div className="space-y-3">
                   {/* Progression */}
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-900/50">
                     <div className="flex items-center">
-                      <Target className="h-4 w-4 text-blue-600 dark:text-blue-400 mr-2" />
-                      <span className="text-sm text-gray-600 dark:text-gray-400">Progression totale:</span>
+                      <Target className="h-4 w-4 text-blue-500 mr-2" />
+                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Total</span>
                     </div>
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">
                       {khatmas} khatma{khatmas > 1 ? 's' : ''} + {progressInCycle} hizb
                     </span>
                   </div>
 
                   {/* Moyenne 8 sem */}
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-900/30 transition-colors">
                     <div className="flex items-center">
-                      <BarChart3 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mr-2" />
-                      <span className="text-sm text-gray-600 dark:text-gray-400">Moyenne (8 sem.):</span>
+                      <BarChart3 className="h-4 w-4 text-emerald-500 mr-2" />
+                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Moyenne (8 sem)</span>
                     </div>
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">
-                      {weeklyAverage} hizb/sem.
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">
+                      {weeklyAverage} /sem
                     </span>
                   </div>
 
                   {/* Meilleure semaine */}
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-900/30 transition-colors">
                     <div className="flex items-center">
-                      <Award className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mr-2" />
-                      <span className="text-sm text-gray-600 dark:text-gray-400">Meilleure semaine:</span>
+                      <Award className="h-4 w-4 text-amber-500 mr-2" />
+                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Record hebdo</span>
                     </div>
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">
-                      {bestVal} hizb {bestDate ? `(${bestDate})` : ''}
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">
+                      {bestVal} hizb
                     </span>
                   </div>
 
                   {/* Série actuelle */}
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-900/30 transition-colors">
                     <div className="flex items-center">
-                      <Zap className="h-4 w-4 text-orange-600 dark:text-orange-400 mr-2" />
-                      <span className="text-sm text-gray-600 dark:text-gray-400">Série actuelle:</span>
+                      <Zap className="h-4 w-4 text-orange-500 mr-2" />
+                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Série</span>
                     </div>
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">
-                      {currentStreak > 0 ? `${currentStreak} semaine${currentStreak > 1 ? 's' : ''} 🔥` : '0 semaine'}
+                    <div className="text-right">
+                      <span className="text-sm font-bold text-slate-900 dark:text-white block">
+                        {currentStreak > 0 ? `${currentStreak} sem 🔥` : '-'}
+                      </span>
                       {bestStreak > currentStreak && (
-                        <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">(Record: {bestStreak})</span>
+                        <span className="text-[10px] text-slate-400 block">Record: {bestStreak}</span>
                       )}
-                    </span>
+                    </div>
                   </div>
 
                   {/* Hizb en retard */}
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700/50">
                     <div className="flex items-center">
                       {hizbRetard.status === 'retard' ? (
-                        <TrendingDown className="h-4 w-4 text-red-600 dark:text-red-400 mr-2" />
+                        <TrendingDown className="h-4 w-4 text-rose-500 mr-2" />
                       ) : hizbRetard.status === 'ajour' ? (
-                        <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400 mr-2" />
+                        <CheckCircle className="h-4 w-4 text-emerald-500 mr-2" />
                       ) : (
-                        <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400 mr-2" />
+                        <TrendingUp className="h-4 w-4 text-blue-500 mr-2" />
                       )}
-                      <span className="text-sm text-gray-600 dark:text-gray-400">Statut:</span>
+                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Statut</span>
                     </div>
                     <span
-                      className={`text-sm font-medium ${
+                      className={`text-sm font-bold ${
                         hizbRetard.status === 'avance'
                           ? 'text-blue-600 dark:text-blue-400'
                           : hizbRetard.status === 'retard'
-                          ? 'text-red-600 dark:text-red-400'
-                          : 'text-green-600 dark:text-green-400'
+                          ? 'text-rose-600 dark:text-rose-400'
+                          : 'text-emerald-600 dark:text-emerald-400'
                       }`}
                     >
                       {hizbRetard.status === 'retard' 
-                        ? `Retard: ${hizbRetard.retard} hizb`
+                        ? `-${hizbRetard.retard}`
                         : hizbRetard.status === 'avance'
-                        ? `Avance: ${hizbRetard.retard} hizb`
+                        ? `+${hizbRetard.retard}`
                         : 'À jour'}
                     </span>
                   </div>
 
                   {/* Prédiction */}
                   {prediction && (
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center">
-                        <Calendar className="h-4 w-4 text-purple-600 dark:text-purple-400 mr-2" />
-                        <span className="text-sm text-gray-600 dark:text-gray-400">Khatma prévue:</span>
-                      </div>
-                      <span className="text-sm font-medium text-gray-900 dark:text-white">
+                    <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400">Khatma estimée</span>
+                      <span className="text-xs font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 px-2 py-0.5 rounded-md">
                         {prediction}
                       </span>
                     </div>
@@ -1107,6 +1177,7 @@ export default function AnalyticsPage() {
             );
           })}
         </div>
+        )}
       </div>
     </div>
   );

@@ -10,7 +10,9 @@ import {
   User,
   Mail,
   ToggleLeft,
-  ToggleRight
+  ToggleRight,
+  Target,
+  Loader2
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { toCSV, parseCSV, calculateWeeklyDeltas } from '../lib/utils';
@@ -145,7 +147,7 @@ export default function ParticipantsPage() {
     reader.onload = async (e) => {
       const content = e.target?.result as string;
       const rows = parseCSV(content);
-      const headers = rows[0];
+      // const headers = rows[0];
       const dataRows = rows.slice(1);
 
       for (const row of dataRows) {
@@ -193,190 +195,188 @@ export default function ParticipantsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Participants</h1>
-          <p className="text-gray-600 dark:text-gray-400">
-            Gérez les participants et leur progression
-          </p>
+      {/* Stats Header */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="glass-panel rounded-2xl p-6 card-hover">
+          <div className="flex items-center justify-between mb-2">
+             <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400">Total Participants</h3>
+             <div className="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-blue-600 dark:text-blue-400">
+               <User className="h-4 w-4" />
+             </div>
+          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{participants.length}</p>
         </div>
-        
-        <div className="flex flex-col sm:flex-row gap-2">
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition-colors"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Ajouter
-          </button>
-          <button
-            onClick={createDemoParticipants}
-            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-          >
-            <User className="h-4 w-4 mr-2" />
-            Démo (16)
-          </button>
+        <div className="glass-panel rounded-2xl p-6 card-hover">
+          <div className="flex items-center justify-between mb-2">
+             <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400">Actifs</h3>
+             <div className="p-2 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-emerald-600 dark:text-emerald-400">
+               <ToggleRight className="h-4 w-4" />
+             </div>
+          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{participants.filter(p => p.active).length}</p>
+        </div>
+        <div className="glass-panel rounded-2xl p-6 card-hover">
+          <div className="flex items-center justify-between mb-2">
+             <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400">Total Khatmas</h3>
+             <div className="p-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-amber-600 dark:text-amber-400">
+               <Target className="h-4 w-4" />
+             </div>
+          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">
+            {Array.from(participantKhatmas.values()).reduce((sum, k) => sum + k, 0)}
+          </p>
         </div>
       </div>
 
-      {/* Filters and Actions */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="flex flex-col lg:flex-row gap-4 items-center justify-between">
-          {/* Search */}
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+      {/* Main Content */}
+      <div className="glass-panel rounded-3xl overflow-hidden">
+        {/* Toolbar */}
+        <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex flex-col lg:flex-row gap-4 justify-between items-center">
+          <div className="relative w-full lg:w-96">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-5 w-5" />
             <input
               type="text"
-              placeholder="Rechercher par nom ou email..."
+              placeholder="Rechercher..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
+              className="input-modern pl-10"
             />
           </div>
 
-          {/* Filter */}
-          <div className="flex items-center gap-2">
-            <Filter className="h-5 w-5 text-gray-400" />
-            <select
-              value={filterActive}
-              onChange={(e) => setFilterActive(e.target.value as any)}
-              className="border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-            >
-              <option value="all">Tous</option>
-              <option value="active">Actifs</option>
-              <option value="inactive">Inactifs</option>
-            </select>
-          </div>
+          <div className="flex items-center gap-3 w-full lg:w-auto overflow-x-auto pb-2 lg:pb-0">
+            <div className="flex items-center bg-slate-50 dark:bg-slate-800 rounded-xl p-1">
+              <button
+                onClick={() => setFilterActive('all')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${filterActive === 'all' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+              >
+                Tous
+              </button>
+              <button
+                onClick={() => setFilterActive('active')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${filterActive === 'active' ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+              >
+                Actifs
+              </button>
+              <button
+                onClick={() => setFilterActive('inactive')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${filterActive === 'inactive' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+              >
+                Inactifs
+              </button>
+            </div>
 
-          {/* Import/Export */}
-          <div className="flex gap-2">
-            <label className="flex items-center px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 cursor-pointer transition-colors">
-              <Upload className="h-4 w-4 mr-2" />
-              Import CSV
-              <input
-                type="file"
-                accept=".csv"
-                onChange={importCSV}
-                className="hidden"
-              />
-            </label>
+            <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 mx-2 hidden lg:block" />
+
             <button
-              onClick={exportCSV}
-              className="flex items-center px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              onClick={() => setShowModal(true)}
+              className="flex items-center px-4 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 whitespace-nowrap font-medium text-sm"
             >
-              <Download className="h-4 w-4 mr-2" />
-              Export CSV
+              <Plus className="h-4 w-4 mr-2" />
+              Nouveau
             </button>
+
+            <div className="flex gap-2">
+              <label className="p-2.5 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl cursor-pointer transition-colors" title="Import CSV">
+                <Upload className="h-5 w-5" />
+                <input type="file" accept=".csv" onChange={importCSV} className="hidden" />
+              </label>
+              <button
+                onClick={exportCSV}
+                className="p-2.5 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-colors"
+                title="Export CSV"
+              >
+                <Download className="h-5 w-5" />
+              </button>
+              <button
+                onClick={createDemoParticipants}
+                className="p-2.5 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-colors"
+                title="Demo Data"
+              >
+                <User className="h-5 w-5" />
+              </button>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Participants List */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-        {loading.participants ? (
-          <div className="p-8 text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600 mx-auto"></div>
-            <p className="mt-2 text-gray-600 dark:text-gray-400">Chargement...</p>
-          </div>
-        ) : filteredParticipants.length === 0 ? (
-          <div className="p-8 text-center">
-            <User className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-600 dark:text-gray-400">Aucun participant trouvé</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead className="bg-gray-50 dark:bg-gray-900">
+        {/* Table */}
+        <div className="overflow-x-auto">
+          {loading.participants ? (
+            <div className="p-12 flex justify-center">
+              <Loader2 className="animate-spin h-10 w-10 text-emerald-600" />
+            </div>
+          ) : filteredParticipants.length === 0 ? (
+            <div className="p-12 text-center">
+              <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Search className="h-8 w-8 text-slate-400" />
+              </div>
+              <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-1">Aucun participant</h3>
+              <p className="text-slate-500 dark:text-slate-400">Essayez de modifier vos filtres ou ajoutez un nouveau participant.</p>
+            </div>
+          ) : (
+            <table className="w-full">
+              <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Participant
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Email
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Statut
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Cycles
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Actions
-                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Participant</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider hidden md:table-cell">Statut</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider hidden sm:table-cell">Objectif</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider hidden lg:table-cell">Performance</th>
+                  <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
-              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
                 {filteredParticipants.map((participant) => (
-                  <tr key={participant.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                    <td className="px-6 py-4 whitespace-nowrap">
+                  <tr key={participant.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                    <td className="px-6 py-4">
                       <div className="flex items-center">
-                        <div className="h-10 w-10 flex-shrink-0">
+                        <div className="h-10 w-10 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-white font-bold shadow-sm">
                           {participant.avatar_url ? (
-                            <img
-                              className="h-10 w-10 rounded-full"
-                              src={participant.avatar_url}
-                              alt=""
-                            />
+                            <img src={participant.avatar_url} alt="" className="h-10 w-10 rounded-full object-cover" />
                           ) : (
-                            <div className="h-10 w-10 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center">
-                              <User className="h-5 w-5 text-gray-500 dark:text-gray-400" />
-                            </div>
+                            participant.name.charAt(0).toUpperCase()
                           )}
                         </div>
                         <div className="ml-4">
-                          <div className="text-sm font-medium text-gray-900 dark:text-white">
-                            {participant.name}
-                          </div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400">
-                            Objectif: {participant.weekly_target_hizb || 7} hizb/semaine
-                          </div>
+                          <div className="font-medium text-slate-900 dark:text-white">{participant.name}</div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400">{participant.email || 'Sans email'}</div>
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
-                        {participant.email ? (
-                          <>
-                            <Mail className="h-4 w-4 mr-2" />
-                            {participant.email}
-                          </>
-                        ) : (
-                          <span className="text-gray-400">Aucun email</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-6 py-4 hidden md:table-cell">
                       <button
                         onClick={() => toggleActive(participant)}
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
                           participant.active
-                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200'
-                            : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                            : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
                         }`}
                       >
-                        {participant.active ? (
-                          <ToggleRight className="h-3 w-3 mr-1" />
-                        ) : (
-                          <ToggleLeft className="h-3 w-3 mr-1" />
-                        )}
                         {participant.active ? 'Actif' : 'Inactif'}
                       </button>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
-                      {participantKhatmas.get(participant.id) || 0} khatma{(participantKhatmas.get(participant.id) || 0) > 1 ? 's' : ''}
+                    <td className="px-6 py-4 hidden sm:table-cell">
+                      <div className="flex items-center text-slate-600 dark:text-slate-300 text-sm">
+                         <Target className="w-4 h-4 mr-2 text-slate-400" />
+                         {participant.weekly_target_hizb || 7} hizb
+                      </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <div className="flex justify-end gap-2">
+                    <td className="px-6 py-4 hidden lg:table-cell">
+                      <div className="text-sm text-slate-600 dark:text-slate-300">
+                        <span className="font-semibold text-slate-900 dark:text-white">{participantKhatmas.get(participant.id) || 0}</span> khatmas
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={() => handleEdit(participant)}
-                          className="text-emerald-600 hover:text-emerald-900 dark:text-emerald-400 dark:hover:text-emerald-300"
+                          className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors"
+                          title="Modifier"
                         >
                           <Edit className="h-4 w-4" />
                         </button>
                         <button
                           onClick={() => handleDelete(participant.id)}
-                          className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
+                          className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                          title="Supprimer"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -386,82 +386,87 @@ export default function ParticipantsPage() {
                 ))}
               </tbody>
             </table>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              {editingParticipant ? 'Modifier le participant' : 'Ajouter un participant'}
-            </h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-md shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800">
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+                {editingParticipant ? 'Modifier le participant' : 'Nouveau participant'}
+              </h2>
+            </div>
             
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Nom *
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                  Nom complet
                 </label>
                 <input
                   type="text"
                   required
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all"
+                  placeholder="ex: Mohamed Ali"
                 />
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Email
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                  Email (optionnel)
                 </label>
                 <input
                   type="email"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all"
+                  placeholder="email@exemple.com"
                 />
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                   URL Avatar
                 </label>
                 <input
                   type="url"
                   value={formData.avatar_url}
                   onChange={(e) => setFormData({ ...formData, avatar_url: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all"
+                  placeholder="https://..."
                 />
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                   Objectif hebdomadaire
                 </label>
                 <select
                   value={formData.weekly_target_hizb}
                   onChange={(e) => setFormData({ ...formData, weekly_target_hizb: Number(e.target.value) as 7 | 14 })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all"
                 >
-                  <option value={7}>7 hizb / semaine</option>
-                  <option value={14}>14 hizb / semaine</option>
+                  <option value={7}>7 hizb / semaine (Standard)</option>
+                  <option value={14}>14 hizb / semaine (Intensif)</option>
                 </select>
               </div>
               
-              <div className="flex items-center">
+              <label className="flex items-center p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
                 <input
                   type="checkbox"
-                  id="active"
                   checked={formData.active}
                   onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
-                  className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 border-gray-300 rounded"
+                  className="h-5 w-5 text-emerald-600 focus:ring-emerald-500 border-slate-300 rounded-md"
                 />
-                <label htmlFor="active" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
-                  Participant actif
-                </label>
-              </div>
+                <div className="ml-3">
+                  <span className="block text-sm font-medium text-slate-900 dark:text-white">Compte Actif</span>
+                  <span className="block text-xs text-slate-500 dark:text-slate-400">Ce participant apparaîtra dans les rapports</span>
+                </div>
+              </label>
               
               <div className="flex justify-end gap-3 pt-4">
                 <button
@@ -471,43 +476,21 @@ export default function ParticipantsPage() {
                     setEditingParticipant(null);
                     setFormData({ name: '', email: '', avatar_url: '', active: true, weekly_target_hizb: 7 });
                   }}
-                  className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  className="px-5 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition-colors"
+                  className="px-5 py-2.5 text-sm font-medium bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 shadow-lg shadow-emerald-500/20 transition-all"
                 >
-                  {editingParticipant ? 'Modifier' : 'Ajouter'}
+                  {editingParticipant ? 'Enregistrer' : 'Créer le participant'}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-          <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-            {participants.length}
-          </div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Total participants</div>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-          <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-            {participants.filter(p => p.active).length}
-          </div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Participants actifs</div>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-          <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">
-            {Array.from(participantKhatmas.values()).reduce((sum, k) => sum + k, 0)}
-          </div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Total khatmas</div>
-        </div>
-      </div>
     </div>
   );
 }

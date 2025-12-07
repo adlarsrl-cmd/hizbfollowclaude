@@ -667,70 +667,75 @@ export default function MonthlyEntriesPage() {
       </div>
 
       {isViewer && (
-        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-4">
-          <p className="text-sm text-blue-800 dark:text-blue-200">
-            <strong>Mode lecture seule:</strong> En tant qu'observateur, vous pouvez consulter les données mais pas les modifier.
-          </p>
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 mb-4 flex items-start gap-3">
+          <div className="p-2 bg-blue-100 dark:bg-blue-900/40 rounded-lg text-blue-600 dark:text-blue-400">
+            <AlertCircle className="h-5 w-5" />
+          </div>
+          <div>
+            <h4 className="text-sm font-bold text-blue-900 dark:text-blue-100 mb-1">Mode lecture seule</h4>
+            <p className="text-sm text-blue-800 dark:text-blue-200">
+              En tant qu'observateur, vous pouvez consulter les données mais pas les modifier.
+            </p>
+          </div>
         </div>
       )}
 
       {/* tableau */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <div className="glass-panel rounded-2xl overflow-hidden shadow-lg shadow-slate-200/50 dark:shadow-none">
         <div className="overflow-x-auto">
           <table className="min-w-full">
-            <thead className="bg-gray-50 dark:bg-gray-900 sticky top-0">
+            <thead className="bg-slate-50/80 dark:bg-slate-900/80 backdrop-blur-sm sticky top-0 z-20 border-b border-slate-200 dark:border-slate-800">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider sticky left-0 bg-gray-50 dark:bg-gray-900 z-10">
+                <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider sticky left-0 bg-slate-50 dark:bg-slate-900 z-30 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.05)] dark:shadow-[4px_0_8px_-2px_rgba(0,0,0,0.2)]">
                   Participant
                 </th>
                 {monthWeeks.map((week) => (
                   <th
                     key={week.weekKey}
-                    className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-24"
+                    className="px-4 py-4 text-center text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider min-w-[100px]"
                   >
-                    <div>{week.displayWeek}</div>
-                    <div className="text-[10px] text-gray-400 dark:text-gray-500">
+                    <div className="text-emerald-600 dark:text-emerald-400 mb-0.5">{week.displayWeek}</div>
+                    <div className="text-[10px] font-normal text-slate-400 dark:text-slate-500">
                       {week.displayDate}
                     </div>
                   </th>
                 ))}
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                <th className="px-6 py-4 text-center text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                   Stats
                 </th>
               </tr>
             </thead>
 
-            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
               {activeParticipants.map((participant) => {
                 const stats = getParticipantStats(participant);
 
                 return (
                   <tr
                     key={participant.id}
-                    className="hover:bg-gray-50 dark:hover:bg-gray-700"
+                    className="group hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors"
                   >
-                    <td className="px-4 py-4 whitespace-nowrap sticky left-0 bg-white dark:bg-gray-800 z-10">
+                    <td className="px-6 py-4 whitespace-nowrap sticky left-0 bg-white dark:bg-slate-950 group-hover:bg-slate-50 dark:group-hover:bg-slate-900 transition-colors z-10 border-r border-slate-100 dark:border-slate-800 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.02)] dark:shadow-[4px_0_8px_-2px_rgba(0,0,0,0.2)]">
                       <div className="flex items-center">
-                        <div className="h-8 w-8 flex-shrink-0">
+                        <div className="h-9 w-9 flex-shrink-0">
                           {participant.avatar_url ? (
                             <img
-                              className="h-8 w-8 rounded-full"
+                              className="h-9 w-9 rounded-full object-cover border-2 border-white dark:border-slate-800 shadow-sm"
                               src={participant.avatar_url}
                               alt=""
                             />
                           ) : (
-                            <div className="h-8 w-8 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center">
-                              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                                {participant.name.charAt(0)}
-                              </span>
+                            <div className="h-9 w-9 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center shadow-sm text-white font-bold text-sm">
+                              {participant.name.charAt(0)}
                             </div>
                           )}
                         </div>
                         <div className="ml-3">
-                          <div className="text-sm font-medium text-gray-900 dark:text-white">
+                          <div className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
                             {participant.name}
                           </div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                          <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600"></span>
                             Obj: {participant.weekly_target_hizb || 7}/sem
                           </div>
                         </div>
@@ -748,93 +753,67 @@ export default function MonthlyEntriesPage() {
                       );
 
                       return (
-                        <td key={week.weekKey} className="px-3 py-4 text-center relative">
-                          <div className="relative group">
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                min="0"
-                                max="60"
-                                value={value}
-                                onChange={(e) =>
-                                  handleCellChange(
-                                    participant.id,
-                                    week.weekKey,
-                                    e.target.value
-                                  )
-                                }
-                                disabled={!canEdit}
-                                className={`w-14 px-2 py-1 text-center border rounded focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white ${
-                                  state?.isModified
-                                    ? 'border-orange-400 bg-orange-50 dark:bg-orange-900/20'
-                                    : state?.error
-                                    ? 'border-red-400 bg-red-50 dark:bg-red-900/20'
-                                    : 'border-gray-300 dark:border-gray-600'
-                                } ${!canEdit ? 'opacity-60 cursor-not-allowed' : ''}`}
-                                placeholder="-"
-                              />
+                        <td key={week.weekKey} className="px-2 py-4 text-center relative">
+                          <div className="relative flex justify-center">
+                            <input
+                              type="number"
+                              min="0"
+                              max="60"
+                              value={value}
+                              onChange={(e) =>
+                                handleCellChange(
+                                  participant.id,
+                                  week.weekKey,
+                                  e.target.value
+                                )
+                              }
+                              disabled={!canEdit}
+                              className={`w-16 py-2 text-center text-sm font-bold bg-transparent border rounded-xl focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all ${
+                                state?.isModified
+                                  ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20'
+                                  : state?.error
+                                  ? 'border-rose-400 bg-rose-50 dark:bg-rose-900/20'
+                                  : entry
+                                  ? 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50' 
+                                  : 'border-transparent hover:border-slate-200 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                              } ${!canEdit ? 'opacity-60 cursor-not-allowed' : ''}`}
+                              placeholder="-"
+                            />
 
-                              {entry && canEdit && (
-                                <button
-                                  onClick={() => deleteCell(participant.id, week.weekKey)}
-                                  className="w-5 h-5 flex items-center justify-center text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                                  title="Supprimer cette entrée"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              )}
-                            </div>
-
-                            {/* badges */}
-                            <div className="absolute -top-1 -right-1 flex gap-1">
+                            {entry && canEdit && (
+                              <button
+                                onClick={() => deleteCell(participant.id, week.weekKey)}
+                                className="absolute -top-2 -right-2 w-5 h-5 flex items-center justify-center bg-white dark:bg-slate-800 text-rose-500 hover:text-rose-600 border border-slate-200 dark:border-slate-700 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-all hover:scale-110 z-10"
+                                title="Supprimer cette entrée"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                            
+                            {/* Indicators */}
+                            <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 flex gap-0.5 pointer-events-none">
                               {entry?.source === 'starting_point' && (
-                                <span className="inline-block w-3 h-3 text-[8px] bg-blue-500 text-white rounded-full flex items-center justify-center">
-                                  📍
-                                </span>
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" title="Départ"></span>
                               )}
                               {entry?.is_restart && (
-                                <span className="inline-block w-3 h-3 text-[8px] bg-amber-500 text-white rounded-full flex items-center justify-center">
-                                  🔁
-                                </span>
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" title="Restart"></span>
                               )}
                               {state?.isSaving && (
-                                <div className="w-3 h-3 border border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-                              )}
-                              {state?.isModified === false && !state?.isSaving && (
-                                <Check className="w-3 h-3 text-emerald-500" />
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
                               )}
                             </div>
-
-                            {/* tooltip */}
-                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20 pointer-events-none">
-                              <div className="font-semibold">
-                                {week.displayDate}
-                              </div>
-                              <div>
-                                {delta > 0
-                                  ? `+${delta} hizb cette semaine`
-                                  : '0 hizb cette semaine'}
-                              </div>
-                              <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
-                            </div>
-
-                            {state?.error && (
-                              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-1 bg-red-500 text-white text-xs rounded whitespace-nowrap z-20">
-                                {state.error}
-                              </div>
-                            )}
                           </div>
                         </td>
                       );
                     })}
 
                     {/* stats */}
-                    <td className="px-4 py-4 text-center">
-                      <div className="text-xs space-y-1">
-                        <div className="font-medium text-gray-900 dark:text-white">
-                          {stats.monthlyAvg}/sem
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="text-sm font-bold text-slate-900 dark:text-white bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-lg">
+                          {stats.monthlyAvg}/s
                         </div>
-                        <div className="text-gray-500 dark:text-gray-400">
+                        <div className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
                           {stats.monthTotal} total
                         </div>
                       </div>
@@ -848,47 +827,51 @@ export default function MonthlyEntriesPage() {
       </div>
 
       {/* récap global */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+      <div className="glass-panel rounded-2xl p-8">
+        <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
+          <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg text-purple-600 dark:text-purple-400">
+            <Calendar className="h-5 w-5" />
+          </div>
           Récapitulatif {monthName}
         </h3>
         
-        <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md">
-          <h4 className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">
-            📋 Format CSV pour import
+        <div className="mb-8 p-4 bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/30 rounded-xl">
+          <h4 className="text-sm font-bold text-blue-700 dark:text-blue-300 mb-2 flex items-center gap-2">
+            <Upload className="h-4 w-4" />
+            Format CSV pour import
           </h4>
-          <p className="text-xs text-blue-700 dark:text-blue-300">
-            <strong>Colonnes requises :</strong> Participant, {monthWeeks.map(w => w.displayWeek).join(', ')}<br/>
-            <strong>Valeurs :</strong> Position en hizb (1-60) ou 0 pour "pas lu cette semaine"<br/>
-            <strong>Exemple :</strong> Adam,15,22,28,35 (Adam a lu jusqu'au hizb 15, 22, 28, 35 chaque semaine)
+          <p className="text-xs leading-relaxed text-blue-600 dark:text-blue-400">
+            <strong className="font-semibold">Colonnes requises :</strong> Participant, {monthWeeks.map(w => w.displayWeek).join(', ')}<br/>
+            <strong className="font-semibold">Valeurs :</strong> Position en hizb (1-60) ou 0 pour "pas lu cette semaine"<br/>
+            <strong className="font-semibold">Exemple :</strong> Adam,15,22,28,35 (Adam a lu jusqu'au hizb 15, 22, 28, 35 chaque semaine)
           </p>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="text-center">
-            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="glass-panel rounded-xl p-5 text-center transform hover:scale-105 transition-transform duration-300">
+            <div className="text-3xl font-bold text-emerald-600 dark:text-emerald-400 mb-1">
               {activeParticipants.length}
             </div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">
+            <div className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">
               Participants actifs
             </div>
           </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+          <div className="glass-panel rounded-xl p-5 text-center transform hover:scale-105 transition-transform duration-300">
+            <div className="text-3xl font-bold text-blue-600 dark:text-blue-400 mb-1">
               {monthWeeks.length}
             </div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">
+            <div className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">
               Semaines du mois
             </div>
           </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">
+          <div className="glass-panel rounded-xl p-5 text-center transform hover:scale-105 transition-transform duration-300">
+            <div className="text-3xl font-bold text-orange-600 dark:text-orange-400 mb-1">
               {activeParticipants.reduce(
                 (sum, p) => sum + getParticipantStats(p).monthTotal,
                 0
               )}
             </div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">
+            <div className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">
               Total hizb lus
             </div>
           </div>

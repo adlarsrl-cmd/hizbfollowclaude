@@ -3,8 +3,18 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+// Debug: Log environment variables in development (first 20 chars only for security)
+if (import.meta.env.DEV) {
+  console.log('🔍 Supabase Config Check:');
+  console.log('URL:', supabaseUrl ? `${supabaseUrl.substring(0, 30)}...` : '❌ MISSING');
+  console.log('Key:', supabaseAnonKey ? `${supabaseAnonKey.substring(0, 20)}...` : '❌ MISSING');
+}
+
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables. Please check your .env file and restart the development server.');
+  const errorMsg = 'Missing Supabase environment variables. Please check your .env file and restart the development server.';
+  console.error('❌', errorMsg);
+  console.error('Expected variables: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY');
+  throw new Error(errorMsg);
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -34,6 +44,28 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
           // Ignore storage errors
         }
       }
+    }
+  },
+  global: {
+    fetch: (url, options = {}) => {
+      // Add better error handling for network issues
+      return fetch(url, {
+        ...options,
+        signal: AbortSignal.timeout(30000) // 30 second timeout
+      }).catch((error) => {
+        if (error.name === 'AbortError') {
+          console.error('⏱️ Supabase request timeout');
+        } else if (error.message?.includes('Failed to fetch') || error.message?.includes('ERR_NAME_NOT_RESOLVED')) {
+          console.error('🌐 Network error: Cannot reach Supabase');
+          console.error('URL:', url);
+          console.error('💡 Check:');
+          console.error('  1. Your internet connection');
+          console.error('  2. Supabase URL in .env file');
+          console.error('  3. If Supabase project still exists');
+          console.error('  4. Try: ping kpzfzqxhtnevdojfhors.supabase.co');
+        }
+        throw error;
+      });
     }
   }
 });

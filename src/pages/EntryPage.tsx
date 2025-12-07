@@ -207,25 +207,25 @@ export default function EntryPage() {
         </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <div className="glass-panel rounded-2xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full">
-            <thead className="bg-gray-50 dark:bg-gray-900">
+            <thead className="bg-slate-50 dark:bg-slate-900/50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs uppercase text-gray-500">Participant</th>
-                <th className="px-4 py-3 text-left text-xs uppercase text-gray-500">Position</th>
-                <th className="px-4 py-3 text-left text-xs uppercase text-gray-500">Cycle</th>
-                <th className="px-4 py-3 text-right text-xs uppercase text-gray-500">Actions</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Participant</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Position</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Cycle</th>
+                <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
               {activeParticipants.map((p) => (
-                <tr key={p.id} className="border-t border-gray-100 dark:border-gray-700">
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900 dark:text-white">{p.name}</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">Obj: {p.weekly_target_hizb || 7}/sem</div>
+                <tr key={p.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                  <td className="px-6 py-4">
+                    <div className="font-medium text-slate-900 dark:text-white">{p.name}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">Obj: {p.weekly_target_hizb || 7}/sem</div>
                   </td>
-                  <td className="px-4 py-3 text-gray-800 dark:text-gray-100">
+                  <td className="px-6 py-4 text-slate-800 dark:text-slate-200">
                     {/* Position pour la semaine sélectionnée */}
                     {(() => {
                       const tuesday = parseWeekKeyTuesday(selectedWeekKey);
@@ -269,8 +269,8 @@ export default function EntryPage() {
                       );
                     })()}
                   </td>
-                  <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{p.cycle_number}</td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-6 py-4 text-slate-600 dark:text-slate-400">{p.cycle_number}</td>
+                  <td className="px-6 py-4 text-right">
                     {(() => {
                       const tuesday = parseWeekKeyTuesday(selectedWeekKey);
                       const weekStart = new Date(tuesday);
@@ -314,57 +314,78 @@ export default function EntryPage() {
 
       {/* Modal saisie */}
       {showManualEntry && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md shadow-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Saisie manuelle</h3>
-              <button onClick={() => setShowManualEntry(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white">Saisie manuelle</h3>
+              <button 
+                onClick={() => setShowManualEntry(false)} 
+                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-slate-600"
+              >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="space-y-4">
-              <div className="text-base font-medium text-gray-900 dark:text-white">
-                {participants.find(p => p.id === manualEntryData.participantId)?.name}
+            <div className="space-y-5">
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800">
+                <div className="text-sm text-slate-500 dark:text-slate-400 mb-1">Participant</div>
+                <div className="text-lg font-bold text-slate-900 dark:text-white">
+                  {participants.find(p => p.id === manualEntryData.participantId)?.name}
+                </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-200">Position ({currentUnit})</label>
+                <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Position atteinte ({currentUnit})</label>
                 <input
                   type="number"
                   min={1}
                   max={currentUnit === 'hizb' ? 60 : 604}
                   value={manualEntryData.value}
                   onChange={(e) => setManualEntryData(prev => ({ ...prev, value: parseInt(e.target.value) || 1 }))}
-                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-900 dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  className="input-modern text-lg font-semibold text-center"
                 />
               </div>
 
-              <div className="flex items-center gap-4">
-                <label className="inline-flex items-center gap-2 text-sm text-gray-900 dark:text-gray-100 cursor-pointer">
+              <div className="flex flex-col gap-3">
+                <label className="flex items-center p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-700">
                   <input
                     type="checkbox"
                     checked={manualEntryData.isStartingPoint}
                     onChange={(e) => setManualEntryData(prev => ({ ...prev, isStartingPoint: e.target.checked, isRestart: false }))}
-                    className="w-4 h-4 text-emerald-600 border-gray-300 dark:border-gray-600 rounded focus:ring-emerald-500"
+                    className="w-5 h-5 text-emerald-600 border-slate-300 dark:border-slate-600 rounded focus:ring-emerald-500"
                   />
-                  📍 Point de départ
+                  <div className="ml-3">
+                    <span className="block text-sm font-medium text-slate-900 dark:text-white">📍 Point de départ</span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400">Première saisie pour ce participant</span>
+                  </div>
                 </label>
-                <label className="inline-flex items-center gap-2 text-sm text-gray-900 dark:text-gray-100 cursor-pointer">
+                
+                <label className="flex items-center p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-700">
                   <input
                     type="checkbox"
                     checked={manualEntryData.isRestart}
                     onChange={(e) => setManualEntryData(prev => ({ ...prev, isRestart: e.target.checked, isStartingPoint: false }))}
-                    className="w-4 h-4 text-emerald-600 border-gray-300 dark:border-gray-600 rounded focus:ring-emerald-500"
+                    className="w-5 h-5 text-emerald-600 border-slate-300 dark:border-slate-600 rounded focus:ring-emerald-500"
                   />
-                  🔁 Redémarrage
+                  <div className="ml-3">
+                    <span className="block text-sm font-medium text-slate-900 dark:text-white">🔁 Redémarrage (Nouvelle Khatma)</span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400">Commence un nouveau cycle de lecture</span>
+                  </div>
                 </label>
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 mt-6">
-              <button onClick={() => setShowManualEntry(false)} className="px-4 py-2 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">Annuler</button>
-              <button onClick={handleManualEntrySave} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">
+            <div className="flex justify-end gap-3 mt-8 pt-6 border-t border-slate-100 dark:border-slate-800">
+              <button 
+                onClick={() => setShowManualEntry(false)} 
+                className="px-5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 font-medium transition-colors"
+              >
+                Annuler
+              </button>
+              <button 
+                onClick={handleManualEntrySave} 
+                className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-500/20 font-medium transition-all"
+              >
                 <Save className="h-4 w-4" /> Sauvegarder
               </button>
             </div>
