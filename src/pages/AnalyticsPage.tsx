@@ -48,6 +48,14 @@ export default function AnalyticsPage() {
 
   const isLoading = loading.participants || loading.entries;
 
+  // Responsive: detect mobile for chart adjustments
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 640);
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+
   // état sélection participants
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
 
@@ -481,10 +489,13 @@ export default function AnalyticsPage() {
           <>
             {/* Heatmap colorée avec tendances */}
             <div className="mb-8">
-              <div className="flex flex-wrap items-center gap-3 mb-4 text-xs font-medium">
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-emerald-500 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Objectif atteint</span></div>
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-amber-400 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Moyen</span></div>
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-500 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Faible</span></div>
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <div className="flex flex-wrap items-center gap-3 text-xs font-medium">
+                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-emerald-500 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Objectif atteint</span></div>
+                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-amber-400 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Moyen</span></div>
+                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-500 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Faible</span></div>
+                </div>
+                <span className="text-[10px] text-slate-400 dark:text-slate-500 sm:hidden flex items-center gap-1">← Glisser →</span>
               </div>
 
               <div className="overflow-x-auto pb-2">
@@ -613,10 +624,13 @@ export default function AnalyticsPage() {
           </div>
         ) : showMonthlyTable && (
           <>
-            <div className="flex flex-wrap items-center gap-3 mb-4 text-sm">
-              <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Objectif atteint</span></div>
-              <div className="flex items-center gap-2"><div className="w-4 h-4 bg-yellow-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Progression moyenne</span></div>
-              <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Faible progression</span></div>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Objectif atteint</span></div>
+                <div className="flex items-center gap-2"><div className="w-4 h-4 bg-yellow-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Progression moyenne</span></div>
+                <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Faible progression</span></div>
+              </div>
+              <span className="text-[10px] text-gray-400 dark:text-gray-500 sm:hidden">← Glisser →</span>
             </div>
 
             <div className="overflow-x-auto">
@@ -772,14 +786,14 @@ export default function AnalyticsPage() {
             <p className="text-gray-600 dark:text-gray-400">Aucune donnée disponible pour ce mois</p>
           </div>
         ) : (
-          <div className="h-80">
+          <div className="h-64 sm:h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={monthlyData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+              <BarChart data={monthlyData} margin={{ top: 10, right: isMobile ? 10 : 30, left: isMobile ? 0 : 20, bottom: isMobile ? 40 : 60 }}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" angle={-45} textAnchor="end" height={80} interval={0} />
-                <YAxis label={{ value: 'Hizb/semaine', angle: -90, position: 'insideLeft' }} />
-                <ReferenceLine y={7} stroke="red" strokeDasharray="4 4" label="7" />
-                <ReferenceLine y={14} stroke="red" strokeDasharray="4 4" label="14" />
+                <XAxis dataKey="name" angle={-40} textAnchor="end" height={isMobile ? 50 : 80} interval={0} tick={{ fontSize: isMobile ? 10 : 12 }} />
+                <YAxis width={isMobile ? 30 : 50} label={isMobile ? undefined : { value: 'Hizb/semaine', angle: -90, position: 'insideLeft' }} tick={{ fontSize: isMobile ? 10 : 12 }} />
+                <ReferenceLine y={7} stroke="red" strokeDasharray="4 4" label={isMobile ? undefined : "7"} />
+                <ReferenceLine y={14} stroke="red" strokeDasharray="4 4" label={isMobile ? undefined : "14"} />
                 <Tooltip
                   formatter={(value: any, name: any) => {
                     if (comparisonMode && comparisonMonth) {
@@ -790,21 +804,21 @@ export default function AnalyticsPage() {
                   labelStyle={{ color: '#374151' }}
                   contentStyle={{ backgroundColor: '#f9fafb', border: '1px solid #d1d5db', borderRadius: '6px' }}
                 />
-                <Legend />
-                <Bar 
-                  dataKey="average" 
-                  fill="#059669" 
-                  radius={[4, 4, 0, 0]} 
-                  name={comparisonMode && comparisonMonth 
+                <Legend wrapperStyle={{ fontSize: isMobile ? '11px' : '12px' }} />
+                <Bar
+                  dataKey="average"
+                  fill="#059669"
+                  radius={[4, 4, 0, 0]}
+                  name={comparisonMode && comparisonMonth
                     ? `${new Date(parseInt(selectedMonth.split('-')[0]), parseInt(selectedMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })}`
                     : "Moyenne hebdomadaire"
-                  } 
+                  }
                 />
                 {comparisonMode && comparisonMonth && (
-                  <Bar 
-                    dataKey="comparisonAverage" 
-                    fill="#0891b2" 
-                    radius={[4, 4, 0, 0]} 
+                  <Bar
+                    dataKey="comparisonAverage"
+                    fill="#0891b2"
+                    radius={[4, 4, 0, 0]}
                     name={`${new Date(parseInt(comparisonMonth.split('-')[0]), parseInt(comparisonMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })}`}
                   />
                 )}
@@ -944,21 +958,21 @@ export default function AnalyticsPage() {
             <p className="text-gray-600 dark:text-gray-400">Aucune donnée hebdomadaire disponible</p>
           </div>
         ) : (
-          <div className="h-80">
+          <div className="h-64 sm:h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weeklyData.chartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+              <BarChart data={weeklyData.chartData} margin={{ top: 10, right: isMobile ? 10 : 30, left: isMobile ? 0 : 20, bottom: isMobile ? 40 : 60 }}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" angle={-45} textAnchor="end" height={80} interval={0} />
-                <YAxis label={{ value: 'Hizb', angle: -90, position: 'insideLeft' }} />
+                <XAxis dataKey="name" angle={-40} textAnchor="end" height={isMobile ? 50 : 80} interval={0} tick={{ fontSize: isMobile ? 10 : 12 }} />
+                <YAxis width={isMobile ? 30 : 50} label={isMobile ? undefined : { value: 'Hizb', angle: -90, position: 'insideLeft' }} tick={{ fontSize: isMobile ? 10 : 12 }} />
                 {/* lignes d'objectif */}
-                <ReferenceLine y={7} stroke="red" strokeDasharray="4 4" label="7" />
-                <ReferenceLine y={14} stroke="red" strokeDasharray="4 4" label="14" />
+                <ReferenceLine y={7} stroke="red" strokeDasharray="4 4" label={isMobile ? undefined : "7"} />
+                <ReferenceLine y={14} stroke="red" strokeDasharray="4 4" label={isMobile ? undefined : "14"} />
                 <Tooltip
                   formatter={(value: any, name: any) => [`${value} hizb`, `Semaine du ${name}`]}
                   labelStyle={{ color: '#374151' }}
                   contentStyle={{ backgroundColor: '#f9fafb', border: '1px solid #d1d5db', borderRadius: '6px' }}
                 />
-                <Legend />
+                <Legend wrapperStyle={{ fontSize: isMobile ? '11px' : '12px' }} />
                 {weeklyData.weeks?.map((w: any, index: number) => {
                   const dataKey = w.monthLabel ? `${w.date}_${w.monthLabel}` : w.date;
                   const monthName = w.monthLabel === 'comp' && comparisonMonth

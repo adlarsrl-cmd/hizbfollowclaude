@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Save, User, Target, Award } from 'lucide-react';
+import { Save, User, Target, Award, RotateCcw, MapPin } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
-import { 
-  getWeekKeyTuesday, 
-  parseWeekKeyTuesday, 
+import {
+  getWeekKeyTuesday,
+  parseWeekKeyTuesday,
   getWeekBoundsTuesday,
   tuesdayNoonISO,
   detectNewKhatma,
@@ -28,6 +28,8 @@ export default function PersonalEntryPage() {
   const [note, setNote] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [isNewKhatma, setIsNewKhatma] = useState(false);
+  const [isStartingPoint, setIsStartingPoint] = useState(false);
 
   // Fetch user's own participants
   useEffect(() => {
@@ -65,6 +67,9 @@ export default function PersonalEntryPage() {
       setValue(lastEntry ? lastEntry.value_int : 1);
       setNote('');
     }
+    // Reset action buttons on participant change
+    setIsNewKhatma(false);
+    setIsStartingPoint(false);
   }, [selectedParticipantId, entries]);
 
   const selectedParticipant = participants.find(p => p.id === selectedParticipantId);
@@ -90,14 +95,21 @@ export default function PersonalEntryPage() {
       let cycleNumber = selectedParticipant.cycle_number;
       let finalNote = note;
 
-      // Detect new khatma
-      if (!existingEntry && lastEntry) {
+      // Handle manual new khatma toggle
+      if (isNewKhatma && !existingEntry) {
+        const baseCycle = lastEntry ? lastEntry.cycle_number : selectedParticipant.cycle_number;
+        cycleNumber = baseCycle + 1;
+        finalNote = finalNote ? `${finalNote} (Nouvelle Khatma)` : 'Nouvelle Khatma';
+      } else if (!existingEntry && lastEntry && !isStartingPoint) {
+        // Auto-detect new khatma only if not a starting point
         const newCycleDetected = detectNewKhatma(value, lastEntry.value_int, currentUnit);
         if (newCycleDetected) {
           cycleNumber = lastEntry.cycle_number + 1;
           finalNote = finalNote ? `${finalNote} (Nouvelle Khatma détectée)` : 'Nouvelle Khatma détectée';
         }
       }
+
+      const entrySource = isStartingPoint ? 'starting_point' : 'manual';
 
       if (existingEntry) {
         // Update existing entry
@@ -115,7 +127,7 @@ export default function PersonalEntryPage() {
           value_int: value,
           cycle_number: cycleNumber,
           note: finalNote,
-          source: 'manual',
+          source: entrySource,
           recorded_at: new Date().toISOString()
         } as any);
       }
@@ -126,6 +138,8 @@ export default function PersonalEntryPage() {
       }
 
       setLastSaved(new Date());
+      setIsNewKhatma(false);
+      setIsStartingPoint(false);
       // Small delay before fetching to ensure DB has propagated the entry
       setTimeout(async () => {
         await fetchEntries();
@@ -137,9 +151,6 @@ export default function PersonalEntryPage() {
       setSaving(false);
     }
   };
-
-  // Quick value buttons
-  const quickValues = [0, 7, 14, 21, 28, 35, 42, 49, 56, 60];
 
   if (!currentUserRole || currentUserRole === 'viewer' || currentUserRole === 'owner' || currentUserRole === 'manager') {
     return (
@@ -267,26 +278,53 @@ export default function PersonalEntryPage() {
                 </p>
               </div>
 
-              {/* Quick Value Buttons */}
+              {/* Action Buttons */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Valeurs rapides
+                  Actions spéciales
                 </label>
-                <div className="grid grid-cols-5 gap-2">
-                  {quickValues.map((quickValue) => (
-                    <button
-                      key={quickValue}
-                      onClick={() => setValue(quickValue)}
-                      className={`px-3 py-2 text-sm rounded-md border transition-colors ${
-                        value === quickValue
-                          ? 'bg-emerald-600 text-white border-emerald-600'
-                          : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-                      }`}
-                    >
-                      {quickValue}
-                    </button>
-                  ))}
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsNewKhatma(!isNewKhatma);
+                      if (!isNewKhatma) setIsStartingPoint(false);
+                    }}
+                    className={`flex items-center justify-center gap-2 px-4 py-3 rounded-md border-2 transition-colors font-medium text-sm ${
+                      isNewKhatma
+                        ? 'bg-purple-600 text-white border-purple-600'
+                        : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-purple-400 dark:hover:border-purple-500'
+                    }`}
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Nouvelle Khatma
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsStartingPoint(!isStartingPoint);
+                      if (!isStartingPoint) setIsNewKhatma(false);
+                    }}
+                    className={`flex items-center justify-center gap-2 px-4 py-3 rounded-md border-2 transition-colors font-medium text-sm ${
+                      isStartingPoint
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500'
+                    }`}
+                  >
+                    <MapPin className="h-4 w-4" />
+                    Point de départ
+                  </button>
                 </div>
+                {isNewKhatma && (
+                  <p className="text-xs text-purple-600 dark:text-purple-400 mt-2">
+                    Une nouvelle khatma sera enregistrée et le compteur de cycles sera incrémenté.
+                  </p>
+                )}
+                {isStartingPoint && (
+                  <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
+                    Cette entrée sera marquée comme point de départ (pas de détection automatique de khatma).
+                  </p>
+                )}
               </div>
 
               <div>

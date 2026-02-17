@@ -848,19 +848,26 @@ export default function MonthlyEntriesPage() {
         </div>
       )}
 
+      {/* Mobile swipe hint */}
+      <div className="sm:hidden flex items-center justify-center gap-2 text-xs text-slate-400 dark:text-slate-500 mb-2">
+        <span>←</span>
+        <span>Faites glisser pour voir toutes les semaines</span>
+        <span>→</span>
+      </div>
+
       {/* tableau */}
       <div className="glass-panel rounded-2xl overflow-hidden shadow-lg shadow-slate-200/50 dark:shadow-none">
         <div className="overflow-x-auto">
           <table className="min-w-full">
             <thead className="bg-slate-50/80 dark:bg-slate-900/80 backdrop-blur-sm sticky top-0 z-20 border-b border-slate-200 dark:border-slate-800">
               <tr>
-                <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider sticky left-0 bg-slate-50 dark:bg-slate-900 z-30 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.05)] dark:shadow-[4px_0_8px_-2px_rgba(0,0,0,0.2)]">
+                <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider sticky left-0 bg-slate-50 dark:bg-slate-900 z-30 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.05)] dark:shadow-[4px_0_8px_-2px_rgba(0,0,0,0.2)] min-w-[130px] sm:min-w-[180px]">
                   Participant
                 </th>
                 {monthWeeks.map((week) => (
                   <th
                     key={week.weekKey}
-                    className="px-4 py-4 text-center text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider min-w-[100px]"
+                    className="px-2 sm:px-4 py-3 sm:py-4 text-center text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider min-w-[80px] sm:min-w-[100px]"
                   >
                     <div className="text-emerald-600 dark:text-emerald-400 mb-0.5">{week.displayWeek}</div>
                     <div className="text-[10px] font-normal text-slate-400 dark:text-slate-500">
@@ -868,7 +875,7 @@ export default function MonthlyEntriesPage() {
                     </div>
                   </th>
                 ))}
-                <th className="px-6 py-4 text-center text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                <th className="px-2 sm:px-6 py-3 sm:py-4 text-center text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                   Stats
                 </th>
               </tr>
@@ -883,26 +890,26 @@ export default function MonthlyEntriesPage() {
                     key={participant.id}
                     className="group hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors"
                   >
-                    <td className="px-6 py-4 whitespace-nowrap sticky left-0 bg-white dark:bg-slate-950 group-hover:bg-slate-50 dark:group-hover:bg-slate-900 transition-colors z-10 border-r border-slate-100 dark:border-slate-800 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.02)] dark:shadow-[4px_0_8px_-2px_rgba(0,0,0,0.2)]">
+                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap sticky left-0 bg-white dark:bg-slate-950 group-hover:bg-slate-50 dark:group-hover:bg-slate-900 transition-colors z-10 border-r border-slate-100 dark:border-slate-800 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.02)] dark:shadow-[4px_0_8px_-2px_rgba(0,0,0,0.2)]">
                       <div className="flex items-center">
-                        <div className="h-9 w-9 flex-shrink-0">
+                        <div className="h-7 w-7 sm:h-9 sm:w-9 flex-shrink-0">
                           {participant.avatar_url ? (
                             <img
-                              className="h-9 w-9 rounded-full object-cover border-2 border-white dark:border-slate-800 shadow-sm"
+                              className="h-7 w-7 sm:h-9 sm:w-9 rounded-full object-cover border-2 border-white dark:border-slate-800 shadow-sm"
                               src={participant.avatar_url}
                               alt=""
                             />
                           ) : (
-                            <div className="h-9 w-9 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center shadow-sm text-white font-bold text-sm">
+                            <div className="h-7 w-7 sm:h-9 sm:w-9 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center shadow-sm text-white font-bold text-xs sm:text-sm">
                               {participant.name.charAt(0)}
                             </div>
                           )}
                         </div>
-                        <div className="ml-3">
-                          <div className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                        <div className="ml-2 sm:ml-3 min-w-0">
+                          <div className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors truncate max-w-[80px] sm:max-w-none">
                             {participant.name}
                           </div>
-                          <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                          <div className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 hidden sm:flex items-center gap-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600"></span>
                             Obj: {participant.weekly_target_hizb || 7}/sem
                           </div>
@@ -921,7 +928,7 @@ export default function MonthlyEntriesPage() {
                       );
 
                       return (
-                        <td key={week.weekKey} className="px-2 py-4 text-center relative">
+                        <td key={week.weekKey} className="px-1 sm:px-2 py-3 sm:py-4 text-center relative">
                           <div className="relative flex justify-center">
                             <input
                               type="number"
@@ -936,7 +943,7 @@ export default function MonthlyEntriesPage() {
                                 )
                               }
                               disabled={!canEdit}
-                              className={`w-16 py-2 text-center text-sm font-bold bg-transparent border rounded-xl focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all ${
+                              className={`w-12 sm:w-16 py-1.5 sm:py-2 text-center text-sm font-bold bg-transparent border rounded-xl focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all ${
                                 state?.isModified
                                   ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20'
                                   : state?.error
@@ -976,12 +983,12 @@ export default function MonthlyEntriesPage() {
                     })}
 
                     {/* stats */}
-                    <td className="px-6 py-4 text-center">
+                    <td className="px-2 sm:px-6 py-3 sm:py-4 text-center">
                       <div className="flex flex-col items-center gap-1">
-                        <div className="text-sm font-bold text-slate-900 dark:text-white bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-lg">
+                        <div className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white bg-slate-100 dark:bg-slate-800 px-1.5 sm:px-2 py-1 rounded-lg whitespace-nowrap">
                           {stats.monthlyAvg}/s
                         </div>
-                        <div className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                        <div className="text-[10px] font-medium text-slate-500 dark:text-slate-400 hidden sm:block">
                           {stats.monthTotal} total
                         </div>
                       </div>

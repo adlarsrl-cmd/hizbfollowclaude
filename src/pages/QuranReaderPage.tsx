@@ -7,8 +7,6 @@ import {
   List,
   Loader2,
   X,
-  ZoomIn,
-  ZoomOut,
   Settings,
   BookOpen,
   Layers,
@@ -38,11 +36,28 @@ import { getWeekKeyTuesday, tuesdayNoonISO } from '../lib/utils';
 type ViewMode = 'page' | 'surah' | 'hizb';
 type LanguageMode = 'arabic' | 'french' | 'both';
 type FontSize = 'small' | 'medium' | 'large' | 'xlarge';
+type FontFamily = 'amiri' | 'noto';
 
 // Styles CSS pour le Tajweed - basé sur quran.com
 const tajweedStyles = `
-  @import url('https://fonts.googleapis.com/css2?family=Amiri+Quran&family=Scheherazade+New:wght@400;700&display=swap');
-  
+  @import url('https://fonts.googleapis.com/css2?family=Amiri+Quran&family=Noto+Naskh+Arabic:wght@400;700&family=Scheherazade+New:wght@400;700&display=swap');
+
+  @keyframes slideInLeft {
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(0); }
+  }
+  @keyframes slideInRight {
+    from { transform: translateX(100%); }
+    to   { transform: translateX(0); }
+  }
+  @keyframes fadeInBackdrop {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  .drawer-slide-left  { animation: slideInLeft  0.28s ease-out; }
+  .drawer-slide-right { animation: slideInRight 0.28s ease-out; }
+  .drawer-backdrop    { animation: fadeInBackdrop 0.28s ease-out; }
+
   .quran-container {
     background: linear-gradient(180deg, #1a1f2e 0%, #0d1117 100%);
   }
@@ -57,6 +72,14 @@ const tajweedStyles = `
     letter-spacing: 0;
   }
   
+  /* Noto Naskh Arabic font variant */
+  .tajweed-text.font-noto {
+    font-family: 'Noto Naskh Arabic', serif;
+  }
+  .bismillah-text.font-noto {
+    font-family: 'Noto Naskh Arabic', serif;
+  }
+
   /* ===== TAJWEED COLORS - Exact Quran.com colors ===== */
   
   /* Silent letter - GREY (#AAAAAA) */
@@ -161,24 +184,46 @@ const tajweedStyles = `
   
   /* ===== VERSE NUMBER ORNAMENT ===== */
   .verse-number {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 44px;
     height: 44px;
-    margin: 0 10px;
-    background: radial-gradient(circle, #1d5c3e 0%, #0f3d2a 100%);
-    border: 2px solid #2d8a5e;
-    border-radius: 50%;
+    /* Push down to align with the center of the first text line.
+       line-height: 2.8 creates ~0.9em of space above the first glyph.
+       offset = (leading_above - half_frame_height) ≈ 14px for typical sizes */
+    margin-top: 14px;
+    margin-left: 6px;
+    margin-right: 6px;
     font-family: 'Amiri Quran', serif;
-    font-size: 16px;
-    color: #c9a227;
-    font-weight: normal;
-    box-shadow: 
-      0 4px 12px rgba(0,0,0,0.5), 
-      inset 0 2px 4px rgba(255,255,255,0.1),
-      inset 0 -2px 4px rgba(0,0,0,0.2);
-    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    font-size: 13px;
+    color: #e8d5a0;
+    font-weight: bold;
+    line-height: 1;
+    z-index: 0;
+  }
+
+  .verse-number::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url('/frameverse.png');
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    /* Dark mode: invert to white then tint gold */
+    filter: invert(1) sepia(0.4) saturate(1.5) brightness(0.95);
+    z-index: -1;
+  }
+
+  .quran-light .verse-number {
+    color: #3a2800;
+  }
+
+  .quran-light .verse-number::before {
+    /* Light mode: keep the frame dark */
+    filter: none;
   }
   
   @media (max-width: 640px) {
@@ -241,9 +286,20 @@ const tajweedStyles = `
   /* ===== BISMILLAH STYLING ===== */
   .bismillah-text {
     font-family: 'Amiri Quran', serif;
-    font-size: 2rem;
+    font-size: 1.4rem;
     color: #c9a227;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  }
+
+  /* ===== LIGHT MODE ===== */
+  .quran-light {
+    background: linear-gradient(180deg, #f0f4f8 0%, #e8edf2 100%) !important;
+  }
+  .quran-light .tajweed-text {
+    color: #1e293b !important;
+  }
+  .quran-light .bismillah-text {
+    text-shadow: none;
   }
 `;
 
@@ -598,14 +654,17 @@ export default function QuranReaderPage() {
   const { error: showError, warning: showWarning } = useToast();
   
   // Store
-  const { 
-    participants, 
-    entries, 
-    addEntry, 
-    updateEntry, 
+  const {
+    participants,
+    entries,
+    addEntry,
+    updateEntry,
     fetchEntries,
-    user 
+    user,
+    theme
   } = useAppStore();
+
+  const isDark = theme === 'dark';
 
   // States
   const [surahs, setSurahs] = useState<Surah[]>([]);
@@ -624,7 +683,12 @@ export default function QuranReaderPage() {
   // UI Settings
   const [languageMode, setLanguageMode] = useState<LanguageMode>('both');
   const [fontSize, setFontSize] = useState<FontSize>('large');
+  const [fontFamily, setFontFamily] = useState<FontFamily>(
+    () => (localStorage.getItem('quran-font-family') as FontFamily) || 'amiri'
+  );
   const [showSurahList, setShowSurahList] = useState(false);
+  const [surahSearch, setSurahSearch] = useState('');
+  const [surahDrawerTab, setSurahDrawerTab] = useState<'surah' | 'hizb'>('surah');
   const [showSettings, setShowSettings] = useState(false);
   
   // Verse interaction
@@ -647,6 +711,11 @@ export default function QuranReaderPage() {
     large: 'text-3xl sm:text-5xl',
     xlarge: 'text-4xl sm:text-6xl'
   };
+
+  // Persist font family preference
+  useEffect(() => {
+    localStorage.setItem('quran-font-family', fontFamily);
+  }, [fontFamily]);
 
   // Close verse menu and dropdown when clicking outside
   useEffect(() => {
@@ -739,32 +808,7 @@ export default function QuranReaderPage() {
     loadVerses();
   }, [viewMode, currentPage, currentSurah, currentHizb, currentVersePage]);
 
-  // Reset verse page when changing surah
-  useEffect(() => {
-    if (viewMode === 'surah') {
-      setCurrentVersePage(1);
-    }
-  }, [currentSurah, viewMode]);
 
-  // Restore position when view mode changes
-  useEffect(() => {
-    const saved = localStorage.getItem('quran-last-saved-position');
-    if (saved) {
-      try {
-        const position = JSON.parse(saved);
-        if (viewMode === 'hizb' && position.hizb_number) {
-          setCurrentHizb(position.hizb_number);
-        } else if (viewMode === 'page' && position.page_number) {
-          setCurrentPage(position.page_number);
-        } else if (viewMode === 'surah' && position.surah_number) {
-          setCurrentSurah(position.surah_number);
-        }
-        setLastSavedVerseKey(position.verse_key);
-      } catch (e) {
-        console.error('Error restoring position:', e);
-      }
-    }
-  }, [viewMode]);
 
   // Scroll to saved verse when verses are loaded
   useEffect(() => {
@@ -776,6 +820,14 @@ export default function QuranReaderPage() {
       }, 300);
     }
   }, [verses, lastSavedVerseKey, loading]);
+
+  // Reading progress (0–100)
+  const readingProgress = useMemo(() => {
+    if (viewMode === 'surah') return Math.round((currentSurah / 114) * 100);
+    if (viewMode === 'page') return Math.round((currentPage / TOTAL_PAGES) * 100);
+    if (viewMode === 'hizb') return Math.round((currentHizb / TOTAL_HIZB) * 100);
+    return 0;
+  }, [viewMode, currentSurah, currentPage, currentHizb]);
 
   // Current surah info
   const currentSurahInfo = useMemo(() => {
@@ -795,6 +847,7 @@ export default function QuranReaderPage() {
       setCurrentPage(prev => Math.min(prev + 1, TOTAL_PAGES));
     } else if (viewMode === 'surah') {
       setCurrentSurah(prev => Math.min(prev + 1, 114));
+      setCurrentVersePage(1);
     } else if (viewMode === 'hizb') {
       setCurrentHizb(prev => Math.min(prev + 1, TOTAL_HIZB));
     }
@@ -805,13 +858,41 @@ export default function QuranReaderPage() {
       setCurrentPage(prev => Math.max(prev - 1, 1));
     } else if (viewMode === 'surah') {
       setCurrentSurah(prev => Math.max(prev - 1, 1));
+      setCurrentVersePage(1);
     } else if (viewMode === 'hizb') {
       setCurrentHizb(prev => Math.max(prev - 1, 1));
     }
   };
 
+  // Switch view mode AND restore last saved position in that mode
+  const switchViewMode = (mode: ViewMode) => {
+    const saved = localStorage.getItem('quran-last-saved-position');
+    if (saved) {
+      try {
+        const position = JSON.parse(saved);
+        if (mode === 'hizb' && position.hizb_number) {
+          setCurrentHizb(position.hizb_number);
+        } else if (mode === 'page' && position.page_number) {
+          setCurrentPage(position.page_number);
+        } else if (mode === 'surah' && position.surah_number) {
+          setCurrentSurah(position.surah_number);
+          // Calculate which paginated page of the surah the saved verse is on (50 verses/page)
+          if (position.verse_key) {
+            const verseNum = parseInt(position.verse_key.split(':')[1]);
+            if (!isNaN(verseNum)) {
+              setCurrentVersePage(Math.ceil(verseNum / 50));
+            }
+          }
+        }
+        setLastSavedVerseKey(position.verse_key);
+      } catch {}
+    }
+    setViewMode(mode);
+  };
+
   const selectSurah = (id: number) => {
     setCurrentSurah(id);
+    setCurrentVersePage(1);
     setViewMode('surah');
     setShowSurahList(false);
   };
@@ -932,27 +1013,21 @@ export default function QuranReaderPage() {
     <>
       <style>{tajweedStyles}</style>
       
-      <div className="quran-container min-h-screen">
+      <div className={`quran-container min-h-screen ${isDark ? '' : 'quran-light'}`}>
         {/* Header */}
-        <div className="sticky top-0 z-40 bg-[#1a1f2e]/95 backdrop-blur-md border-b border-gray-700/50">
-          <div className="max-w-5xl mx-auto px-4 py-3">
+        <div className={`sticky top-0 z-30 backdrop-blur-md border-b ${isDark ? 'bg-[#1a1f2e]/95 border-gray-700/50' : 'bg-white/95 border-gray-200/80'}`}>
+          <div className="max-w-5xl mx-auto px-4 py-2">
             <div className="flex items-center justify-between">
               {/* Title */}
-              <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
-                <div className="p-1.5 md:p-2 bg-emerald-900/50 rounded-xl border border-emerald-700/30">
-                  <Book className="h-5 w-5 md:h-6 md:w-6 text-emerald-400" />
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="p-1.5 bg-emerald-900/50 rounded-lg border border-emerald-700/30">
+                  <Book className="h-4 w-4 text-emerald-400" />
                 </div>
-                <div className="hidden sm:block">
-                  <h1 className="text-lg md:text-xl font-bold text-white font-arabic">القرآن الكريم</h1>
-                  <p className="text-xs text-emerald-400">Tajweed</p>
-                </div>
-                <div className="sm:hidden">
-                  <h1 className="text-base font-bold text-white font-arabic">القرآن</h1>
-                </div>
+                <h1 className={`text-base font-bold font-arabic ${isDark ? 'text-white' : 'text-gray-900'}`}>القرآن الكريم</h1>
               </div>
 
               {/* View Mode - Desktop: 3 buttons, Mobile: Dropdown */}
-              <div className="hidden md:flex items-center gap-1 bg-gray-800/50 rounded-xl p-1 border border-gray-700/50">
+              <div className={`hidden md:flex items-center gap-1 rounded-xl p-1 border ${isDark ? 'bg-gray-800/50 border-gray-700/50' : 'bg-gray-100/80 border-gray-300/50'}`}>
                 {[
                   { mode: 'surah' as ViewMode, icon: BookOpen, label: 'Sourate' },
                   { mode: 'page' as ViewMode, icon: FileText, label: 'Page' },
@@ -960,11 +1035,11 @@ export default function QuranReaderPage() {
                 ].map(({ mode, icon: Icon, label }) => (
                   <button
                     key={mode}
-                    onClick={() => setViewMode(mode)}
+                    onClick={() => switchViewMode(mode)}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                       viewMode === mode
                         ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50'
-                        : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+                        : isDark ? 'text-gray-400 hover:text-white hover:bg-gray-700/50' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/70'
                     }`}
                   >
                     <Icon className="h-4 w-4" />
@@ -977,7 +1052,7 @@ export default function QuranReaderPage() {
               <div className="md:hidden relative" ref={viewModeDropdownRef}>
                 <button
                   onClick={() => setShowViewModeDropdown(!showViewModeDropdown)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all bg-gray-800/50 text-gray-400 hover:text-white hover:bg-gray-700/50 border border-gray-700/50"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all border ${isDark ? 'bg-gray-800/50 text-gray-400 hover:text-white hover:bg-gray-700/50 border-gray-700/50' : 'bg-gray-100/80 text-gray-600 hover:text-gray-900 hover:bg-gray-200/70 border-gray-300/50'}`}
                 >
                   {viewMode === 'surah' && <BookOpen className="h-4 w-4" />}
                   {viewMode === 'page' && <FileText className="h-4 w-4" />}
@@ -988,7 +1063,7 @@ export default function QuranReaderPage() {
                   <ChevronDown className={`h-4 w-4 transition-transform ${showViewModeDropdown ? 'rotate-180' : ''}`} />
                 </button>
                 {showViewModeDropdown && (
-                  <div className="absolute right-0 mt-2 w-32 bg-gray-800 rounded-lg shadow-lg z-50 border border-gray-700">
+                  <div className={`absolute right-0 mt-2 w-32 rounded-lg shadow-lg z-50 border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
                     {[
                       { mode: 'surah' as ViewMode, label: 'Sourate' },
                       { mode: 'page' as ViewMode, label: 'Page' },
@@ -997,13 +1072,13 @@ export default function QuranReaderPage() {
                       <button
                         key={mode}
                         onClick={() => {
-                          setViewMode(mode);
+                          switchViewMode(mode);
                           setShowViewModeDropdown(false);
                         }}
                         className={`block w-full text-left px-4 py-2 text-sm transition-colors ${
                           viewMode === mode
                             ? 'bg-emerald-600 text-white'
-                            : 'text-gray-400 hover:bg-gray-700/50 hover:text-white'
+                            : isDark ? 'text-gray-400 hover:bg-gray-700/50 hover:text-white' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                         }`}
                       >
                         {label}
@@ -1027,14 +1102,14 @@ export default function QuranReaderPage() {
                 )}
                 <button
                   onClick={() => setShowSurahList(true)}
-                  className="p-2 hover:bg-gray-700/50 rounded-xl transition-colors text-gray-400 hover:text-white"
+                  className={`hidden sm:block p-2 rounded-xl transition-colors ${isDark ? 'hover:bg-gray-700/50 text-gray-400 hover:text-white' : 'hover:bg-gray-200/70 text-gray-500 hover:text-gray-900'}`}
                   title="Liste des sourates"
                 >
                   <List className="h-5 w-5" />
                 </button>
                 <button
-                  onClick={() => setShowSettings(!showSettings)}
-                  className="p-2 hover:bg-gray-700/50 rounded-xl transition-colors text-gray-400 hover:text-white"
+                  onClick={() => setShowSettings(true)}
+                  className={`hidden sm:block p-2 rounded-xl transition-colors ${isDark ? 'hover:bg-gray-700/50 text-gray-400 hover:text-white' : 'hover:bg-gray-200/70 text-gray-500 hover:text-gray-900'}`}
                   title="Paramètres"
                 >
                   <Settings className="h-5 w-5" />
@@ -1042,12 +1117,19 @@ export default function QuranReaderPage() {
               </div>
             </div>
           </div>
+          {/* Progress bar */}
+          <div className={`h-0.5 w-full ${isDark ? 'bg-gray-800' : 'bg-gray-200'}`}>
+            <div
+              className="h-full bg-emerald-500 transition-all duration-500 ease-out"
+              style={{ width: `${readingProgress}%` }}
+            />
+          </div>
         </div>
 
         {/* Main Content */}
-        <div className="max-w-5xl mx-auto px-4 py-6">
-          {/* Navigation */}
-          <div className="flex items-center justify-between mb-6">
+        <div className="max-w-5xl mx-auto px-4 py-6 pb-24">
+          {/* Navigation — desktop only, replaced by bottom bar on mobile */}
+          <div className="hidden sm:flex items-center justify-between mb-6">
             <button
               onClick={goToPrev}
               disabled={
@@ -1055,18 +1137,18 @@ export default function QuranReaderPage() {
                 (viewMode === 'surah' && currentSurah <= 1) ||
                 (viewMode === 'hizb' && currentHizb <= 1)
               }
-              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-gray-800/50 border border-gray-700/50 rounded-xl hover:bg-gray-700/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-white"
+              className={`flex items-center gap-2 px-3 sm:px-4 py-2 border rounded-xl disabled:opacity-30 disabled:cursor-not-allowed transition-colors ${isDark ? 'bg-gray-800/50 border-gray-700/50 hover:bg-gray-700/50 text-white' : 'bg-white/80 border-gray-300/80 hover:bg-gray-100/80 text-gray-800'}`}
             >
               <ChevronLeft className="h-5 w-5" />
               <span className="hidden sm:inline text-sm font-medium">Précédent</span>
             </button>
 
             <div className="text-center min-w-0 px-2">
-              <div className="text-base sm:text-2xl font-bold text-white font-arabic truncate">
+              <div className={`text-base sm:text-2xl font-bold font-arabic truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
                 {getPositionLabel()}
               </div>
               {currentSurahInfo && (
-                <div className="text-sm text-emerald-400">
+                <div className="text-sm text-emerald-600">
                   {currentSurahInfo.translated_name?.name} • {currentSurahInfo.verses_count} versets
                 </div>
               )}
@@ -1079,7 +1161,7 @@ export default function QuranReaderPage() {
                 (viewMode === 'surah' && currentSurah >= 114) ||
                 (viewMode === 'hizb' && currentHizb >= TOTAL_HIZB)
               }
-              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-gray-800/50 border border-gray-700/50 rounded-xl hover:bg-gray-700/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-white"
+              className={`flex items-center gap-2 px-3 sm:px-4 py-2 border rounded-xl disabled:opacity-30 disabled:cursor-not-allowed transition-colors ${isDark ? 'bg-gray-800/50 border-gray-700/50 hover:bg-gray-700/50 text-white' : 'bg-white/80 border-gray-300/80 hover:bg-gray-100/80 text-gray-800'}`}
             >
               <span className="hidden sm:inline text-sm font-medium">Suivant</span>
               <ChevronRight className="h-5 w-5" />
@@ -1087,7 +1169,7 @@ export default function QuranReaderPage() {
           </div>
 
           {/* Verses Display */}
-          <div className="bg-[#0f1318] rounded-2xl shadow-2xl border border-gray-800 p-3 sm:p-6 md:p-10">
+          <div className={`rounded-2xl shadow-2xl border p-3 sm:p-6 md:p-10 ${isDark ? 'bg-[#0f1318] border-gray-800' : 'bg-white border-gray-200'}`}>
             {loading ? (
               <div className="flex flex-col items-center justify-center py-20">
                 <Loader2 className="h-10 w-10 text-emerald-500 animate-spin mb-4" />
@@ -1114,15 +1196,10 @@ export default function QuranReaderPage() {
                   }
                   return false;
                 })() && (
-                  <div className="text-center py-8 mb-6 border-b border-gray-800/50">
-                    <p className="bismillah-text text-3xl md:text-4xl">
+                  <div className={`text-center py-3 mb-2 border-b ${isDark ? 'border-gray-800/50' : 'border-gray-200/50'}`}>
+                    <p className={`bismillah-text ${fontFamily === 'noto' ? 'font-noto' : ''}`}>
                       ﷽
                     </p>
-                    {(languageMode === 'french' || languageMode === 'both') && (
-                      <p className="text-gray-500 mt-3 text-sm">
-                        Au nom d'Allah, le Tout Miséricordieux, le Très Miséricordieux
-                      </p>
-                    )}
                   </div>
                 )}
 
@@ -1141,7 +1218,7 @@ export default function QuranReaderPage() {
                     {(languageMode === 'arabic' || languageMode === 'both') && (
                       <div className="flex items-start justify-end gap-2">
                         <div
-                          className={`tajweed-text ${fontSizes[fontSize]} flex-1`}
+                          className={`tajweed-text ${fontFamily === 'noto' ? 'font-noto' : ''} ${fontSizes[fontSize]} flex-1`}
                           dangerouslySetInnerHTML={{
                             __html: processTajweedHtml(verse.text_uthmani_tajweed || verse.text_uthmani)
                           }}
@@ -1160,7 +1237,7 @@ export default function QuranReaderPage() {
                             {verse.verse_number}
                           </span>
                         )}
-                        <p className="text-base text-gray-300 leading-relaxed">
+                        <p className={`text-base leading-relaxed ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
                           {verse.translations[0].text.replace(/<[^>]*>/g, '')}
                         </p>
                       </div>
@@ -1175,7 +1252,7 @@ export default function QuranReaderPage() {
           <div className="mt-6 flex items-center justify-center gap-4">
             {viewMode === 'page' && (
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-400">Page:</span>
+                <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Page:</span>
                 <input
                   type="number"
                   min={1}
@@ -1199,7 +1276,7 @@ export default function QuranReaderPage() {
             )}
             {viewMode === 'surah' && (
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-400">Sourate:</span>
+                <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Sourate:</span>
                 <input
                   type="number"
                   min={1}
@@ -1223,7 +1300,7 @@ export default function QuranReaderPage() {
             )}
             {viewMode === 'hizb' && (
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-400">Hizb:</span>
+                <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Hizb:</span>
                 <input
                   type="number"
                   min={1}
@@ -1249,24 +1326,24 @@ export default function QuranReaderPage() {
 
           {/* Surah Pagination for long surahs */}
           {viewMode === 'surah' && totalVersePages > 1 && (
-            <div className="mt-6 flex items-center justify-center gap-4 pt-6 border-t border-gray-800/50">
+            <div className={`mt-6 flex items-center justify-center gap-4 pt-6 border-t ${isDark ? 'border-gray-800/50' : 'border-gray-200/80'}`}>
               <button
                 onClick={() => setCurrentVersePage(p => Math.max(1, p - 1))}
                 disabled={currentVersePage === 1}
-                className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-gray-800/50 border border-gray-700/50 rounded-xl hover:bg-gray-700/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-white"
+                className={`flex items-center gap-2 px-3 sm:px-4 py-2 border rounded-xl disabled:opacity-30 disabled:cursor-not-allowed transition-colors ${isDark ? 'bg-gray-800/50 border-gray-700/50 hover:bg-gray-700/50 text-white' : 'bg-white/80 border-gray-300/80 hover:bg-gray-100/80 text-gray-800'}`}
               >
                 <ChevronLeft className="h-5 w-5" />
                 <span className="hidden sm:inline text-sm font-medium">Précédent</span>
               </button>
 
-              <span className="text-sm text-gray-400">
+              <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
                 Page {currentVersePage} / {totalVersePages}
               </span>
 
               <button
                 onClick={() => setCurrentVersePage(p => Math.min(totalVersePages, p + 1))}
                 disabled={currentVersePage >= totalVersePages}
-                className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-gray-800/50 border border-gray-700/50 rounded-xl hover:bg-gray-700/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-white"
+                className={`flex items-center gap-2 px-3 sm:px-4 py-2 border rounded-xl disabled:opacity-30 disabled:cursor-not-allowed transition-colors ${isDark ? 'bg-gray-800/50 border-gray-700/50 hover:bg-gray-700/50 text-white' : 'bg-white/80 border-gray-300/80 hover:bg-gray-100/80 text-gray-800'}`}
               >
                 <span className="hidden sm:inline text-sm font-medium">Suivant</span>
                 <ChevronRight className="h-5 w-5" />
@@ -1275,143 +1352,294 @@ export default function QuranReaderPage() {
           )}
         </div>
 
-        {/* Surah List Modal */}
-        {showSurahList && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-            <div className="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden">
-              <div className="flex items-center justify-between p-4 border-b border-gray-700">
-                <h2 className="text-xl font-bold text-white font-arabic">قائمة السور</h2>
-                <button
-                  onClick={() => setShowSurahList(false)}
-                  className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="p-4 overflow-y-auto space-y-2">
-                {surahs.map((surah) => (
-                  <button
-                    key={surah.id}
-                    onClick={() => selectSurah(surah.id)}
-                    className="flex items-center justify-between w-full p-3 rounded-xl bg-gray-800/50 hover:bg-gray-700/50 transition-colors text-white gap-3"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-xs font-medium text-gray-500 w-6 text-right flex-shrink-0">{surah.id}.</span>
-                      <span className="font-arabic text-lg truncate">{surah.name_arabic}</span>
-                    </div>
-                    <div className="text-right flex-shrink-0 max-w-[45%]">
-                      <span className="text-sm text-gray-400 block truncate">{surah.translated_name.name}</span>
-                      <span className="text-xs text-gray-600 hidden sm:block">{surah.verses_count} versets</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Bottom Navigation Bar */}
+        <div className={`fixed bottom-0 left-0 right-0 z-40 border-t backdrop-blur-md ${isDark ? 'bg-[#1a1f2e]/95 border-gray-700/50' : 'bg-white/95 border-gray-200/80'}`}>
+          <div className="flex items-center justify-around px-2 py-2 pb-safe">
+            {/* Previous */}
+            <button
+              onClick={goToPrev}
+              disabled={
+                (viewMode === 'page' && currentPage <= 1) ||
+                (viewMode === 'surah' && currentSurah <= 1) ||
+                (viewMode === 'hizb' && currentHizb <= 1)
+              }
+              className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed transition-colors ${isDark ? 'text-gray-400 hover:text-white active:bg-gray-700/50' : 'text-gray-500 hover:text-gray-900 active:bg-gray-100'}`}
+            >
+              <ChevronLeft className="h-5 w-5" />
+              <span className="text-[10px]">Précédent</span>
+            </button>
 
-        {/* Settings Modal */}
-        {showSettings && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <div className="bg-[#0f1318] rounded-2xl shadow-2xl border border-gray-800 p-6 w-full max-w-md max-h-[90vh] overflow-y-auto relative">
+            {/* Surah List */}
+            <button
+              onClick={() => setShowSurahList(true)}
+              className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-colors ${isDark ? 'text-gray-400 hover:text-white active:bg-gray-700/50' : 'text-gray-500 hover:text-gray-900 active:bg-gray-100'}`}
+            >
+              <List className="h-5 w-5" />
+              <span className="text-[10px]">Sourates</span>
+            </button>
+
+            {/* Current Position (center) */}
+            <div className="flex flex-col items-center px-2 min-w-0 max-w-[100px]">
+              <span className={`text-sm font-bold font-arabic truncate w-full text-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                {getPositionLabel()}
+              </span>
+              <span className="text-[10px] text-emerald-500">{readingProgress}%</span>
+            </div>
+
+            {/* Settings */}
+            <button
+              onClick={() => setShowSettings(true)}
+              className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-colors ${isDark ? 'text-gray-400 hover:text-white active:bg-gray-700/50' : 'text-gray-500 hover:text-gray-900 active:bg-gray-100'}`}
+            >
+              <Settings className="h-5 w-5" />
+              <span className="text-[10px]">Réglages</span>
+            </button>
+
+            {/* Next */}
+            <button
+              onClick={goToNext}
+              disabled={
+                (viewMode === 'page' && currentPage >= TOTAL_PAGES) ||
+                (viewMode === 'surah' && currentSurah >= 114) ||
+                (viewMode === 'hizb' && currentHizb >= TOTAL_HIZB)
+              }
+              className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed transition-colors ${isDark ? 'text-gray-400 hover:text-white active:bg-gray-700/50' : 'text-gray-500 hover:text-gray-900 active:bg-gray-100'}`}
+            >
+              <ChevronRight className="h-5 w-5" />
+              <span className="text-[10px]">Suivant</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Surah List Drawer */}
+        {showSurahList && (
+        <div className="fixed inset-0 z-[80]">
+          {/* Backdrop */}
+          <div
+            className={`drawer-backdrop absolute inset-0 bg-black/50`}
+            onClick={() => setShowSurahList(false)}
+          />
+          {/* Panel — slides from left */}
+          <div className={`drawer-slide-left absolute top-0 left-0 h-full w-full max-w-sm shadow-2xl border-r flex flex-col ${isDark ? 'bg-[#0f1318] border-gray-800' : 'bg-white border-gray-200'}`}>
+            {/* Drawer Header */}
+            <div className={`flex items-center justify-between px-5 py-4 border-b flex-shrink-0 ${isDark ? 'border-gray-800' : 'border-gray-200'}`}>
+              <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Navigation</h3>
               <button
-                onClick={() => setShowSettings(false)}
-                className="absolute top-4 right-4 p-2 bg-gray-700/50 rounded-full text-gray-400 hover:text-white hover:bg-gray-600/50 transition-colors"
+                onClick={() => setShowSurahList(false)}
+                className={`p-2 rounded-lg transition-colors ${isDark ? 'text-gray-400 hover:text-white hover:bg-gray-700/50' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}
               >
                 <X className="h-5 w-5" />
               </button>
-              <h3 className="text-xl font-bold text-white mb-4">Paramètres de lecture</h3>
-              <div className="space-y-6">
-                {/* Language Selection */}
-                <div>
-                  <p className="text-sm font-medium text-gray-400 mb-2">Langue:</p>
-                  <div className="flex gap-2 bg-gray-800/50 rounded-xl p-1 border border-gray-700/50">
-                    {[
-                      { mode: 'arabic' as LanguageMode, label: 'عربي' },
-                      { mode: 'french' as LanguageMode, label: 'FR' },
-                      { mode: 'both' as LanguageMode, label: 'Les deux' },
-                    ].map(({ mode, label }) => (
+            </div>
+
+            {/* Tabs */}
+            <div className={`flex gap-1 px-5 py-3 border-b flex-shrink-0 ${isDark ? 'border-gray-800' : 'border-gray-200'}`}>
+              {([
+                { tab: 'surah' as const, label: 'Sourates' },
+                { tab: 'hizb' as const, label: 'Hizb' },
+              ]).map(({ tab, label }) => (
+                <button
+                  key={tab}
+                  onClick={() => setSurahDrawerTab(tab)}
+                  className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    surahDrawerTab === tab
+                      ? 'bg-emerald-600 text-white'
+                      : isDark ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Search (surah tab only) */}
+            {surahDrawerTab === 'surah' && (
+              <div className={`px-5 py-3 border-b flex-shrink-0 ${isDark ? 'border-gray-800' : 'border-gray-200'}`}>
+                <input
+                  type="text"
+                  value={surahSearch}
+                  onChange={(e) => setSurahSearch(e.target.value)}
+                  placeholder="Rechercher une sourate..."
+                  className={`w-full px-3 py-2 rounded-lg text-sm border outline-none transition-colors ${isDark ? 'bg-gray-800 border-gray-700 text-white placeholder-gray-500 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-400 focus:border-emerald-500'}`}
+                />
+              </div>
+            )}
+
+            {/* List Body */}
+            <div className="flex-1 overflow-y-auto">
+              {surahDrawerTab === 'surah' ? (
+                <div className="p-3 space-y-1">
+                  {surahs
+                    .filter((s) => {
+                      if (!surahSearch.trim()) return true;
+                      const q = surahSearch.toLowerCase();
+                      return (
+                        s.name_arabic.includes(surahSearch) ||
+                        s.translated_name.name.toLowerCase().includes(q) ||
+                        String(s.id).includes(q)
+                      );
+                    })
+                    .map((surah) => (
                       <button
-                        key={mode}
-                        onClick={() => setLanguageMode(mode)}
-                        className={`flex-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                          languageMode === mode
-                            ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50'
-                            : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+                        key={surah.id}
+                        onClick={() => { selectSurah(surah.id); setSurahSearch(''); }}
+                        className={`flex items-center justify-between w-full px-3 py-2.5 rounded-xl transition-colors gap-3 ${
+                          currentSurah === surah.id && viewMode === 'surah'
+                            ? 'bg-emerald-600/20 border border-emerald-500/30 text-emerald-500'
+                            : isDark ? 'hover:bg-gray-800 text-white' : 'hover:bg-gray-50 text-gray-900'
                         }`}
                       >
-                        {label}
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className={`text-xs font-medium w-6 text-center flex-shrink-0 rounded-md py-0.5 ${isDark ? 'bg-gray-800 text-gray-500' : 'bg-gray-100 text-gray-400'}`}>{surah.id}</span>
+                          <span className="font-arabic text-base truncate">{surah.name_arabic}</span>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <span className={`text-xs truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{surah.translated_name.name}</span>
+                        </div>
                       </button>
                     ))}
-                  </div>
                 </div>
-
-                {/* Font Size */}
-                <div>
-                  <p className="text-sm font-medium text-gray-400 mb-2">Taille:</p>
-                  <div className="flex gap-2 bg-gray-800/50 rounded-xl p-1 border border-gray-700/50">
-                    {[
-                      { size: 'small' as FontSize, label: 'S' },
-                      { size: 'medium' as FontSize, label: 'M' },
-                      { size: 'large' as FontSize, label: 'L' },
-                      { size: 'xlarge' as FontSize, label: 'XL' },
-                    ].map(({ size, label }) => (
-                      <button
-                        key={size}
-                        onClick={() => setFontSize(size)}
-                        className={`flex-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                          fontSize === size
-                            ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50'
-                            : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
+              ) : (
+                <div className="p-4 grid grid-cols-5 gap-2">
+                  {Array.from({ length: TOTAL_HIZB }, (_, i) => i + 1).map((hizb) => (
+                    <button
+                      key={hizb}
+                      onClick={() => { setCurrentHizb(hizb); setViewMode('hizb'); setShowSurahList(false); }}
+                      className={`aspect-square flex items-center justify-center rounded-xl text-sm font-medium transition-colors ${
+                        currentHizb === hizb && viewMode === 'hizb'
+                          ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/30'
+                          : isDark ? 'bg-gray-800 hover:bg-gray-700 text-gray-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                      }`}
+                    >
+                      {hizb}
+                    </button>
+                  ))}
                 </div>
+              )}
+            </div>
+          </div>
+        </div>
+        )}
 
-                {/* Tajweed Legend */}
-                <div className="pt-3 border-t border-gray-700/50">
-                  <p className="text-xs font-medium text-gray-400 mb-2">Tajweed colors ▲</p>
-                  <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#AAAAAA' }}></span>
-                      <span className="text-gray-400">Silent letter</span>
+        {/* Settings Side Drawer */}
+        {showSettings && (
+        <div className="fixed inset-0 z-[80]">
+          {/* Backdrop */}
+          <div
+            className="drawer-backdrop absolute inset-0 bg-black/50"
+            onClick={() => setShowSettings(false)}
+          />
+          {/* Panel */}
+          <div className={`drawer-slide-right absolute top-0 right-0 h-full w-full max-w-sm shadow-2xl border-l flex flex-col ${isDark ? 'bg-[#0f1318] border-gray-800' : 'bg-white border-gray-200'}`}>
+            {/* Drawer Header */}
+            <div className={`flex items-center justify-between px-5 py-4 border-b flex-shrink-0 ${isDark ? 'border-gray-800' : 'border-gray-200'}`}>
+              <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Paramètres</h3>
+              <button
+                onClick={() => setShowSettings(false)}
+                className={`p-2 rounded-lg transition-colors ${isDark ? 'text-gray-400 hover:text-white hover:bg-gray-700/50' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Drawer Body */}
+            <div className="flex-1 overflow-y-auto px-5 py-6 space-y-6">
+              {/* Language Selection */}
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Langue</p>
+                <div className={`flex gap-2 rounded-xl p-1 border ${isDark ? 'bg-gray-800/50 border-gray-700/50' : 'bg-gray-100/80 border-gray-300/50'}`}>
+                  {[
+                    { mode: 'arabic' as LanguageMode, label: 'عربي' },
+                    { mode: 'french' as LanguageMode, label: 'FR' },
+                    { mode: 'both' as LanguageMode, label: 'Les deux' },
+                  ].map(({ mode, label }) => (
+                    <button
+                      key={mode}
+                      onClick={() => setLanguageMode(mode)}
+                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                        languageMode === mode
+                          ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50'
+                          : isDark ? 'text-gray-400 hover:text-white hover:bg-gray-700/50' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/70'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Font Size */}
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Taille du texte</p>
+                <div className={`flex gap-2 rounded-xl p-1 border ${isDark ? 'bg-gray-800/50 border-gray-700/50' : 'bg-gray-100/80 border-gray-300/50'}`}>
+                  {[
+                    { size: 'small' as FontSize, label: 'S' },
+                    { size: 'medium' as FontSize, label: 'M' },
+                    { size: 'large' as FontSize, label: 'L' },
+                    { size: 'xlarge' as FontSize, label: 'XL' },
+                  ].map(({ size, label }) => (
+                    <button
+                      key={size}
+                      onClick={() => setFontSize(size)}
+                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                        fontSize === size
+                          ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50'
+                          : isDark ? 'text-gray-400 hover:text-white hover:bg-gray-700/50' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/70'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Typography */}
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Typographie</p>
+                <div className={`flex gap-2 rounded-xl p-1 border ${isDark ? 'bg-gray-800/50 border-gray-700/50' : 'bg-gray-100/80 border-gray-300/50'}`}>
+                  {([
+                    { family: 'amiri' as FontFamily, label: 'Amiri Quran' },
+                    { family: 'noto' as FontFamily, label: 'Noto Naskh' },
+                  ] as { family: FontFamily; label: string }[]).map(({ family, label }) => (
+                    <button
+                      key={family}
+                      onClick={() => setFontFamily(family)}
+                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                        fontFamily === family
+                          ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50'
+                          : isDark ? 'text-gray-400 hover:text-white hover:bg-gray-700/50' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/70'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tajweed Legend */}
+              <div className={`pt-4 border-t ${isDark ? 'border-gray-800' : 'border-gray-200'}`}>
+                <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Couleurs Tajweed</p>
+                <div className="flex flex-col gap-2.5">
+                  {[
+                    { color: '#AAAAAA', label: 'Lettre silencieuse' },
+                    { color: '#FFC1E0', label: 'Madd normal (2)' },
+                    { color: '#F49E38', label: 'Madd séparé (2/4/6)' },
+                    { color: '#CF3D9E', label: 'Madd connecté (4/5)' },
+                    { color: '#E04A5A', label: 'Madd nécessaire (6)' },
+                    { color: '#39B578', label: "Ghunna / Ikhfa'" },
+                    { color: '#49C1CE', label: 'Qalqala (écho)' },
+                    { color: '#6DB1DB', label: 'Tafkhim (lourd)' },
+                  ].map(({ color, label }) => (
+                    <span key={label} className="flex items-center gap-3">
+                      <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: color }}></span>
+                      <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>{label}</span>
                     </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#FFC1E0' }}></span>
-                      <span className="text-gray-400">Normal madd (2)</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#F49E38' }}></span>
-                      <span className="text-gray-400">Separated madd (2/4/6)</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#CF3D9E' }}></span>
-                      <span className="text-gray-400">Connected madd (4/5)</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#E04A5A' }}></span>
-                      <span className="text-gray-400">Necessary madd (6)</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#39B578' }}></span>
-                      <span className="text-gray-400">Ghunna/ikhfa'</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#49C1CE' }}></span>
-                      <span className="text-gray-400">Qalqala (echo)</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#6DB1DB' }}></span>
-                      <span className="text-gray-400">Tafkhim (heavy)</span>
-                    </span>
-                  </div>
+                  ))}
                 </div>
               </div>
             </div>
           </div>
+        </div>
         )}
 
         {/* Verse Context Menu — bottom sheet on mobile, floating on desktop */}
@@ -1424,9 +1652,10 @@ export default function QuranReaderPage() {
             />
             <div
               ref={verseMenuRef}
-              className={`z-50 bg-gray-800 border border-gray-700 shadow-xl
-                fixed bottom-0 left-0 right-0 rounded-t-2xl p-4 pb-8
-                sm:absolute sm:bottom-auto sm:left-auto sm:right-auto sm:rounded-lg sm:p-2 sm:pb-2`}
+              className={`z-50 shadow-xl border
+                fixed bottom-0 left-0 right-0 rounded-t-2xl p-4 pb-24
+                sm:absolute sm:bottom-auto sm:left-auto sm:right-auto sm:rounded-lg sm:p-2 sm:pb-2
+                ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
               style={
                 typeof window !== 'undefined' && window.innerWidth >= 640
                   ? { top: verseMenuPosition.y, left: verseMenuPosition.x }
@@ -1434,8 +1663,8 @@ export default function QuranReaderPage() {
               }
             >
               {/* Mobile drag handle */}
-              <div className="w-10 h-1 bg-gray-600 rounded-full mx-auto mb-4 sm:hidden" />
-              <p className="text-xs text-gray-500 px-3 mb-2 sm:hidden">
+              <div className={`w-10 h-1 rounded-full mx-auto mb-4 sm:hidden ${isDark ? 'bg-gray-600' : 'bg-gray-300'}`} />
+              <p className={`text-xs px-3 mb-2 sm:hidden ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
                 Verset {selectedVerse.verse_key}
               </p>
               <ul className="space-y-1">
@@ -1443,7 +1672,7 @@ export default function QuranReaderPage() {
                   <button
                     onClick={saveReadingProgress}
                     disabled={savingProgress || !isAuthenticated}
-                    className="flex items-center gap-3 px-3 py-3 sm:py-2 text-sm text-emerald-400 hover:bg-gray-700 rounded-xl sm:rounded-md w-full text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                    className={`flex items-center gap-3 px-3 py-3 sm:py-2 text-sm text-emerald-500 rounded-xl sm:rounded-md w-full text-left disabled:opacity-50 disabled:cursor-not-allowed ${isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}
                   >
                     {savingProgress ? (
                       <Loader2 className="h-5 w-5 sm:h-4 sm:w-4 animate-spin" />
