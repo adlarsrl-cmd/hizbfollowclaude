@@ -242,20 +242,20 @@ export default function GroupsPage() {
           </p>
         </div>
         
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <button
             onClick={() => setShowJoinModal(true)}
             className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
           >
             <ExternalLink className="h-4 w-4 mr-2" />
-            Rejoindre un groupe
+            Rejoindre
           </button>
           <button
             onClick={() => setShowCreateModal(true)}
             className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition-colors"
           >
             <Plus className="h-4 w-4 mr-2" />
-            Créer un groupe
+            Créer
           </button>
         </div>
       </div>
@@ -432,28 +432,28 @@ export default function GroupsPage() {
                   return (
                     <div
                       key={member.id}
-                      className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg"
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg"
                     >
                       <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 bg-gray-200 dark:bg-gray-600 rounded-full flex items-center justify-center">
+                        <div className="h-8 w-8 bg-gray-200 dark:bg-gray-600 rounded-full flex items-center justify-center flex-shrink-0">
                           <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                             {member.user_profile?.full_name?.charAt(0) || '?'}
                           </span>
                         </div>
-                        <div>
-                          <div className="font-medium text-gray-900 dark:text-white">
+                        <div className="min-w-0">
+                          <div className="font-medium text-gray-900 dark:text-white truncate">
                             {member.user_profile?.full_name || 'Utilisateur'}
                             {isCurrentUser && (
                               <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">(vous)</span>
                             )}
                           </div>
                           <div className="text-sm text-gray-500 dark:text-gray-400">
-                            Membre depuis {new Date(member.created_at).toLocaleDateString('fr-FR')}
+                            Depuis {new Date(member.created_at).toLocaleDateString('fr-FR')}
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                         {canModify ? (
                           <select
                             value={member.role}

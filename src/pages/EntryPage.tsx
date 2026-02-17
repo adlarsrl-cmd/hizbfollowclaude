@@ -163,25 +163,31 @@ export default function EntryPage() {
       }
 
       setShowManualEntry(false);
-      await fetchEntries();
+      // Small delay before fetching to ensure DB has propagated the entry
+      // This prevents the entry from disappearing due to timing issues
+      setTimeout(async () => {
+        await fetchEntries();
+      }, 500);
     } catch (e) {
       console.error('Error saving manual entry:', e);
+      // If there was an error, fetch to ensure state is correct
+      await fetchEntries();
     }
   };
 
   // ---- UI simplifiée (table) ----
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Saisie hebdomadaire</h1>
           <p className="text-gray-600 dark:text-gray-400">Mardi → lundi. Sauvegarde forcée au mardi 12:00.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 self-center sm:self-auto">
           <button onClick={() => setSelectedWeekOffset(selectedWeekOffset - 1)} className="px-3 py-2 rounded-md bg-gray-100 dark:bg-gray-700">
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <div className="text-center min-w-64">
+          <div className="text-center min-w-40 sm:min-w-64">
             <div className={`text-lg font-semibold ${weekDisplayInfo.isCurrentWeek ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-900 dark:text-white'}`}>
               {weekDisplayInfo.weekNumber}
               {weekDisplayInfo.isCurrentWeek && <span className="ml-2 text-sm font-normal">(Actuelle)</span>}
@@ -208,7 +214,82 @@ export default function EntryPage() {
       </div>
 
       <div className="glass-panel rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Mobile View (Cards) */}
+        <div className="md:hidden divide-y divide-slate-100 dark:divide-slate-800">
+          {activeParticipants.map((p) => {
+            const tuesday = parseWeekKeyTuesday(selectedWeekKey);
+            const weekStart = new Date(tuesday);
+            weekStart.setDate(tuesday.getDate() - 1);
+            weekStart.setHours(0, 0, 0, 0);
+            
+            const weekEnd = new Date(tuesday);
+            weekEnd.setDate(tuesday.getDate() + 5);
+            weekEnd.setHours(23, 59, 59, 999);
+            
+            const weekEntry = entries
+              .filter(e => e.participant_id === p.id)
+              .find(e => {
+                const entryDate = new Date(e.recorded_at);
+                return entryDate >= weekStart && entryDate <= weekEnd;
+              });
+
+            return (
+              <div key={p.id} className="p-4 space-y-3">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="font-medium text-slate-900 dark:text-white">{p.name}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">Obj: {p.weekly_target_hizb || 7}/sem</div>
+                  </div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">
+                    Cycle {p.cycle_number}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl">
+                  <div className="text-sm">
+                    <span className="block text-xs text-slate-500 mb-1">Position</span>
+                    {weekEntry ? (
+                      <div className="flex flex-wrap gap-2 items-center">
+                        <span className="font-bold text-slate-900 dark:text-white">
+                          {weekEntry.unit_type === currentUnit
+                            ? weekEntry.value_int
+                            : (currentUnit === 'hizb' ? toHizb(weekEntry.value_int) : toPages(weekEntry.value_int))} {currentUnit}
+                        </span>
+                        {weekEntry.source === 'starting_point' && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">Départ</span>
+                        )}
+                        {weekEntry.is_restart && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">Restart</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-slate-400 italic">Non saisi</span>
+                    )}
+                  </div>
+                  
+                  {weekEntry ? (
+                    <button 
+                      onClick={() => openManualEntry(p.id)} 
+                      className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/40 transition-colors"
+                    >
+                      <Edit className="h-5 w-5" />
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => openManualEntry(p.id)} 
+                      className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/40 transition-colors"
+                    >
+                      <Plus className="h-5 w-5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Desktop Table View */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="min-w-full">
             <thead className="bg-slate-50 dark:bg-slate-900/50">
               <tr>
@@ -271,28 +352,28 @@ export default function EntryPage() {
                   </td>
                   <td className="px-6 py-4 text-slate-600 dark:text-slate-400">{p.cycle_number}</td>
                   <td className="px-6 py-4 text-right">
-                    {(() => {
-                      const tuesday = parseWeekKeyTuesday(selectedWeekKey);
-                      const weekStart = new Date(tuesday);
-                      weekStart.setDate(tuesday.getDate() - 1);
-                      weekStart.setHours(0, 0, 0, 0);
-                      
-                      const weekEnd = new Date(tuesday);
-                      weekEnd.setDate(tuesday.getDate() + 5);
-                      weekEnd.setHours(23, 59, 59, 999);
-                      
-                      const weekEntry = entries
-                        .filter(e => e.participant_id === p.id)
-                        .find(e => {
-                          const entryDate = new Date(e.recorded_at);
-                          return entryDate >= weekStart && entryDate <= weekEnd;
-                        });
-                      
-                      return weekEntry ? (
-                        <button 
-                          onClick={() => openManualEntry(p.id)} 
-                          className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700"
-                        >
+                      {(() => {
+                        const tuesday = parseWeekKeyTuesday(selectedWeekKey);
+                        const weekStart = new Date(tuesday);
+                        weekStart.setDate(tuesday.getDate() - 1);
+                        weekStart.setHours(0, 0, 0, 0);
+                        
+                        const weekEnd = new Date(tuesday);
+                        weekEnd.setDate(tuesday.getDate() + 5);
+                        weekEnd.setHours(23, 59, 59, 999);
+                        
+                        const weekEntry = entries
+                          .filter(e => e.participant_id === p.id)
+                          .find(e => {
+                            const entryDate = new Date(e.recorded_at);
+                            return entryDate >= weekStart && entryDate <= weekEnd;
+                          });
+                        
+                        return weekEntry ? (
+                          <button 
+                            onClick={() => openManualEntry(p.id)} 
+                            className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700"
+                          >
                           <Edit className="h-4 w-4" /> Modifier
                         </button>
                       ) : (
@@ -301,9 +382,9 @@ export default function EntryPage() {
                           className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700"
                         >
                           <Plus className="h-4 w-4" /> Saisir
-                        </button>
+                          </button>
                       );
-                    })()}
+                      })()}
                   </td>
                 </tr>
               ))}
@@ -330,7 +411,7 @@ export default function EntryPage() {
               <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800">
                 <div className="text-sm text-slate-500 dark:text-slate-400 mb-1">Participant</div>
                 <div className="text-lg font-bold text-slate-900 dark:text-white">
-                  {participants.find(p => p.id === manualEntryData.participantId)?.name}
+                {participants.find(p => p.id === manualEntryData.participantId)?.name}
                 </div>
               </div>
 

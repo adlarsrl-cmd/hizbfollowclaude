@@ -397,7 +397,7 @@ export default function AnalyticsPage() {
 
       {/* Sélection participants */}
       <div className="glass-panel rounded-2xl p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
           <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center">
             <Users className="h-5 w-5 text-emerald-600 dark:text-emerald-400 mr-2" />
             Sélection des participants
@@ -436,7 +436,7 @@ export default function AnalyticsPage() {
 
       {/* Tableau hebdo (timeline/heatmap/table) */}
       <div className="glass-panel rounded-2xl p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <div className="p-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
@@ -481,7 +481,7 @@ export default function AnalyticsPage() {
           <>
             {/* Heatmap colorée avec tendances */}
             <div className="mb-8">
-              <div className="flex items-center gap-4 mb-4 text-xs font-medium">
+              <div className="flex flex-wrap items-center gap-3 mb-4 text-xs font-medium">
                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-emerald-500 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Objectif atteint</span></div>
                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-amber-400 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Moyen</span></div>
                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-500 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Faible</span></div>
@@ -512,7 +512,7 @@ export default function AnalyticsPage() {
                       </div>
                       <div className="w-16 p-2 flex items-center justify-center">
                         <div className="text-center text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg px-2 py-1 font-bold">
-                          {data.target}
+                        {data.target}
                         </div>
                       </div>
                       {weeks.map((w: any) => {
@@ -569,7 +569,7 @@ export default function AnalyticsPage() {
 
       {/* Moyennes mensuelles */}
       <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">📊 Moyennes mensuelles</h2>
             <button
@@ -580,9 +580,9 @@ export default function AnalyticsPage() {
               {showMonthlyTable ? 'Masquer' : 'Afficher'}
             </button>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-600 dark:text-gray-400">De:</label>
+              <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">De:</label>
               <input
                 type="month"
                 value={monthlyFromDate}
@@ -591,7 +591,7 @@ export default function AnalyticsPage() {
               />
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-600 dark:text-gray-400">À:</label>
+              <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">À:</label>
               <input
                 type="month"
                 value={monthlyToDate}
@@ -613,7 +613,7 @@ export default function AnalyticsPage() {
           </div>
         ) : showMonthlyTable && (
           <>
-            <div className="flex items-center gap-4 mb-4 text-sm">
+            <div className="flex flex-wrap items-center gap-3 mb-4 text-sm">
               <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Objectif atteint</span></div>
               <div className="flex items-center gap-2"><div className="w-4 h-4 bg-yellow-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Progression moyenne</span></div>
               <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Faible progression</span></div>
@@ -696,7 +696,7 @@ export default function AnalyticsPage() {
 
       {/* Analyse mensuelle (graph classement) */}
       <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div className="flex items-center">
             <BarChart3 className="h-5 w-5 text-emerald-600 dark:text-emerald-400 mr-2" />
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Analyse mensuelle</h2>
@@ -721,8 +721,8 @@ export default function AnalyticsPage() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 {comparisonMode ? 'Mois 1 (principal)' : 'Mois à analyser'}
               </label>
-              <select
-                value={selectedMonth}
+          <select
+            value={selectedMonth}
                 onChange={(e) => {
                   setSelectedMonth(e.target.value);
                   // Reset comparison month if it's the same as selected month
@@ -731,15 +731,15 @@ export default function AnalyticsPage() {
                   }
                 }}
                 className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-              >
-                {availableMonths.map(m => {
-                  const [y, mNum] = m.split('-').map(Number);
-                  const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-                  return <option key={m} value={m}>{monthName}</option>;
-                })}
-              </select>
-            </div>
-            
+          >
+            {availableMonths.map(m => {
+              const [y, mNum] = m.split('-').map(Number);
+              const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+              return <option key={m} value={m}>{monthName}</option>;
+            })}
+          </select>
+        </div>
+
             {comparisonMode && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Mois 2 (comparaison)</label>
@@ -816,7 +816,7 @@ export default function AnalyticsPage() {
 
       {/* Lectures hebdomadaires (graph multi-séries) */}
       <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div className="flex items-center">
             <Calendar className="h-5 w-5 text-blue-600 dark:text-blue-400 mr-2" />
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Lectures hebdomadaires</h2>
@@ -866,12 +866,12 @@ export default function AnalyticsPage() {
             {/* Contrôles conditionnels */}
             {weeklyReadingsMode === 'month' ? (
               <div className={comparisonMode ? 'grid grid-cols-1 md:grid-cols-2 gap-4 w-full' : ''}>
-                <div>
+              <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     {comparisonMode ? 'Mois 1 (principal)' : 'Mois à analyser'}
                   </label>
-                  <select
-                    value={selectedMonth}
+                <select
+                  value={selectedMonth}
                     onChange={(e) => {
                       setSelectedMonth(e.target.value);
                       // Reset comparison month if it's the same as selected month
@@ -880,13 +880,13 @@ export default function AnalyticsPage() {
                       }
                     }}
                     className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-                  >
-                    {availableMonths.map(m => {
-                      const [y, mNum] = m.split('-').map(Number);
-                      const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-                      return <option key={m} value={m}>{monthName}</option>;
-                    })}
-                  </select>
+                >
+                  {availableMonths.map(m => {
+                    const [y, mNum] = m.split('-').map(Number);
+                    const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+                    return <option key={m} value={m}>{monthName}</option>;
+                  })}
+                </select>
                 </div>
                 {comparisonMode && (
                   <div>
@@ -1127,7 +1127,7 @@ export default function AnalyticsPage() {
                     <div className="text-right">
                       <span className="text-sm font-bold text-slate-900 dark:text-white block">
                         {currentStreak > 0 ? `${currentStreak} sem 🔥` : '-'}
-                      </span>
+                    </span>
                       {bestStreak > currentStreak && (
                         <span className="text-[10px] text-slate-400 block">Record: {bestStreak}</span>
                       )}
