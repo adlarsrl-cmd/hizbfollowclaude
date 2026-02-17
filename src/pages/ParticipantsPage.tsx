@@ -298,8 +298,86 @@ export default function ParticipantsPage() {
           </div>
         </div>
 
-        {/* Table */}
-        <div className="overflow-x-auto">
+        {/* Mobile View (Cards) */}
+        <div className="md:hidden divide-y divide-slate-100 dark:divide-slate-800">
+          {loading.participants ? (
+            <div className="p-12 flex justify-center">
+              <Loader2 className="animate-spin h-10 w-10 text-emerald-600" />
+            </div>
+          ) : filteredParticipants.length === 0 ? (
+            <div className="p-8 text-center">
+               <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-3">
+                 <Search className="h-6 w-6 text-slate-400" />
+               </div>
+               <p className="text-slate-500 dark:text-slate-400">Aucun participant trouvé</p>
+            </div>
+          ) : (
+            filteredParticipants.map((participant) => (
+              <div key={participant.id} className="p-4 space-y-3">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center">
+                    <div className="h-10 w-10 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-white font-bold shadow-sm flex-shrink-0">
+                      {participant.avatar_url ? (
+                        <img src={participant.avatar_url} alt="" className="h-10 w-10 rounded-full object-cover" />
+                      ) : (
+                        participant.name.charAt(0).toUpperCase()
+                      )}
+                    </div>
+                    <div className="ml-3">
+                      <div className="font-medium text-slate-900 dark:text-white">{participant.name}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">{participant.email || 'Sans email'}</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleEdit(participant)}
+                      className="p-2 text-slate-400 hover:text-emerald-600 bg-slate-50 dark:bg-slate-800 rounded-lg"
+                    >
+                      <Edit className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(participant.id)}
+                      className="p-2 text-slate-400 hover:text-red-600 bg-slate-50 dark:bg-slate-800 rounded-lg"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                   <div className="bg-slate-50 dark:bg-slate-800/50 p-2 rounded-lg">
+                     <span className="text-xs text-slate-500 block">Statut</span>
+                     <button
+                        onClick={() => toggleActive(participant)}
+                        className={`mt-1 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                          participant.active
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                            : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                        }`}
+                      >
+                        {participant.active ? 'Actif' : 'Inactif'}
+                      </button>
+                   </div>
+                   <div className="bg-slate-50 dark:bg-slate-800/50 p-2 rounded-lg">
+                     <span className="text-xs text-slate-500 block">Objectif</span>
+                     <div className="mt-1 font-medium text-slate-700 dark:text-slate-300">
+                       {participant.weekly_target_hizb || 7} hizb
+                     </div>
+                   </div>
+                   <div className="col-span-2 bg-slate-50 dark:bg-slate-800/50 p-2 rounded-lg flex justify-between items-center">
+                     <span className="text-xs text-slate-500">Performance</span>
+                     <span className="font-medium text-slate-900 dark:text-white">
+                       {participantKhatmas.get(participant.id) || 0} khatmas
+                     </span>
+                   </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Desktop Table View */}
+        <div className="hidden md:block overflow-x-auto">
           {loading.participants ? (
             <div className="p-12 flex justify-center">
               <Loader2 className="animate-spin h-10 w-10 text-emerald-600" />

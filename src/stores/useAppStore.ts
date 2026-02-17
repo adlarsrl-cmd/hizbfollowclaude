@@ -208,11 +208,11 @@ export const useAppStore = create<AppState>()(
             get().fetchMyGroups().catch(err => console.warn('Groups fetch error:', err)),
             get().fetchUserProfile().catch(err => console.warn('Profile fetch error:', err)),
           ]).then(() => {
-            // Auto-select group if user has only one
-            const { groups } = get();
-            if (groups.length === 1) {
+          // Auto-select group if user has only one
+          const { groups } = get();
+          if (groups.length === 1) {
               get().setActiveGroup(groups[0].id).catch(err => console.warn('Set active group error:', err));
-            }
+          }
           }).catch(() => {
             // Ignore all errors - login should succeed regardless
           });
@@ -925,7 +925,7 @@ export const useAppStore = create<AppState>()(
               const { data: myParticipants } = await supabase
                 .from('participants')
                 .select('id')
-                .eq('group_id', activeGroupId())
+              .eq('group_id', activeGroupId())
                 .eq('user_id', userId);
 
               const participantIds = myParticipants?.map(p => p.id) || [];

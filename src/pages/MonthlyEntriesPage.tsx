@@ -9,6 +9,7 @@ import {
   Download,
   Upload,
   X,
+  Sparkles,
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import {
@@ -53,6 +54,7 @@ export default function MonthlyEntriesPage() {
 
   const isViewer = currentUserRole === 'viewer';
   const canEdit = !isViewer;
+  const isOwner = currentUserRole === 'owner'; // Seul le propriétaire (admin) peut utiliser "Remplir auto"
 
   // ----- état principal -----
   const [selectedMonth, setSelectedMonth] = useState(() => {
@@ -68,6 +70,9 @@ export default function MonthlyEntriesPage() {
   const [saveTimeouts, setSaveTimeouts] = useState<
     Record<string, NodeJS.Timeout>
   >({});
+  // modale remplissage auto
+  const [showFillModal, setShowFillModal] = useState(false);
+  const [selectedWeekToFill, setSelectedWeekToFill] = useState<string>('');
 
   useEffect(() => {
     fetchParticipants();
@@ -127,12 +132,30 @@ export default function MonthlyEntriesPage() {
   const entriesIndex = useMemo(() => {
     const index = new Map<string, Entry>();
     for (const entry of entries) {
-      const wk = getWeekKeyTuesday(new Date(entry.recorded_at));
+      // Calculate weekKey from recorded_at
+      // tuesdayNoonISO creates dates at 12:00 UTC (noon to avoid timezone issues)
+      // getWeekKeyTuesday works in local timezone, but since recorded_at is at noon UTC,
+      // it should always be the same day in local timezone (noon UTC = afternoon in most timezones)
+      const entryDate = new Date(entry.recorded_at);
+      const wk = getWeekKeyTuesday(entryDate);
       const key = `${entry.participant_id}-${wk}`;
+      
+      // Debug: log if we see entries being indexed
+      if (process.env.NODE_ENV === 'development' && entries.length > 0 && entries.length < 10) {
+        console.log('Entry indexed:', {
+          entryId: entry.id,
+          participantId: entry.participant_id,
+          recorded_at: entry.recorded_at,
+          weekKey: wk,
+          key
+        });
+      }
+      
+      // Keep the most recent entry for this participant+week combination
       if (
         !index.has(key) ||
-        new Date(entry.recorded_at) >
-          new Date(index.get(key)!.recorded_at)
+        new Date(entry.recorded_at).getTime() >
+          new Date(index.get(key)!.recorded_at).getTime()
       ) {
         index.set(key, entry);
       }
@@ -251,7 +274,12 @@ export default function MonthlyEntriesPage() {
           } as any);
         }
 
-        await fetchEntries();
+        // Don't fetchEntries immediately - addEntry/updateEntry already update the state
+        // Only fetch after a delay to ensure DB consistency, but the UI should update immediately
+        // via the optimistic state update in addEntry/updateEntry
+        setTimeout(async () => {
+          await fetchEntries();
+        }, 1000);
 
         // UI : on marque sauvegardé.
         // IMPORTANT : si l'utilisateur avait tapé "0", on garde l'affichage "0"
@@ -402,6 +430,128 @@ export default function MonthlyEntriesPage() {
     link.download = `entrees-mensuelles-${selectedMonth}.csv`;
     link.click();
   }, [activeParticipants, monthWeeks, getCellValue, selectedMonth]);
+
+  // Remplir automatiquement une semaine spécifique avec la moyenne arrondie vers le haut
+  const fillMissingWeek = useCallback(async (weekKey: string) => {
+    if (!isOwner || !weekKey) {
+      alert('Seul le propriétaire du groupe peut utiliser cette fonctionnalité.');
+      return;
+    }
+
+    // Trouver l'index de la semaine sélectionnée
+    const weekIndex = monthWeeks.findIndex(w => w.weekKey === weekKey);
+    if (weekIndex === -1) {
+      alert('Semaine non trouvée');
+      return;
+    }
+
+    let filledCount = 0;
+    const promises: Promise<void>[] = [];
+
+    for (const participant of activeParticipants) {
+      const week = monthWeeks[weekIndex];
+      const entry = getCellEntry(participant.id, week.weekKey);
+      
+      // Si la semaine a déjà une entrée, on passe
+      if (entry) continue;
+      
+      // Trouver LA semaine précédente immédiate (même si elle est dans un autre mois)
+      let prevValue: number | null = null;
+      let prevWeekKey: string | null = null;
+      
+      // Calculer la semaine précédente en soustrayant 7 jours
+      const currentTuesday = parseWeekKeyTuesday(week.weekKey);
+      const prevTuesday = new Date(currentTuesday);
+      prevTuesday.setDate(prevTuesday.getDate() - 7);
+      prevWeekKey = getWeekKeyTuesday(prevTuesday);
+      
+      // Chercher dans toutes les entrées (pas seulement dans monthWeeks)
+      let prevEntry = getCellEntry(participant.id, prevWeekKey);
+      if (!prevEntry) {
+        prevEntry = entries.find(e => {
+          if (e.participant_id !== participant.id) return false;
+          const entryWeekKey = getWeekKeyTuesday(new Date(e.recorded_at));
+          return entryWeekKey === prevWeekKey;
+        });
+      }
+      
+      if (prevEntry) {
+        prevValue = prevEntry.value_int;
+      }
+      
+      // Trouver LA semaine suivante immédiate (même si elle est dans un autre mois)
+      let nextValue: number | null = null;
+      let nextWeekKey: string | null = null;
+      
+      // Calculer la semaine suivante en ajoutant 7 jours
+      const nextTuesday = new Date(currentTuesday);
+      nextTuesday.setDate(nextTuesday.getDate() + 7);
+      nextWeekKey = getWeekKeyTuesday(nextTuesday);
+      
+      // Chercher dans toutes les entrées (pas seulement dans monthWeeks)
+      let nextEntry = getCellEntry(participant.id, nextWeekKey);
+      if (!nextEntry) {
+        nextEntry = entries.find(e => {
+          if (e.participant_id !== participant.id) return false;
+          const entryWeekKey = getWeekKeyTuesday(new Date(e.recorded_at));
+          return entryWeekKey === nextWeekKey;
+        });
+      }
+      
+      if (nextEntry) {
+        nextValue = nextEntry.value_int;
+      }
+      
+      // Calculer la moyenne si on a au moins une valeur
+      let averageValue: number | null = null;
+      if (prevValue !== null && nextValue !== null) {
+        // Moyenne des deux valeurs adjacentes, arrondie vers le haut
+        averageValue = Math.ceil((prevValue + nextValue) / 2);
+      } else if (prevValue !== null) {
+        // Utiliser seulement la valeur précédente
+        averageValue = prevValue;
+      } else if (nextValue !== null) {
+        // Utiliser seulement la valeur suivante
+        averageValue = nextValue;
+      }
+      
+      // Si on a une valeur à insérer
+      if (averageValue !== null && averageValue > 0 && averageValue <= 60) {
+        const promise = (async () => {
+          try {
+            const recorded_at = tuesdayNoonISO(week.weekKey);
+            await addEntry({
+              participant_id: participant.id,
+              unit_type: 'hizb',
+              value_int: averageValue,
+              cycle_number: participant.cycle_number || 0,
+              source: 'manual',
+              recorded_at,
+              note: `Rempli automatiquement (moyenne: ${prevValue !== null ? prevValue : '?'}${nextValue !== null ? ` + ${nextValue}` : ''})`
+            } as any);
+            filledCount++;
+          } catch (error) {
+            console.error(`Erreur remplissage semaine ${week.weekKey} pour ${participant.name}:`, error);
+          }
+        })();
+        promises.push(promise);
+      }
+    }
+    
+    // Attendre que toutes les sauvegardes soient terminées
+    await Promise.all(promises);
+    await fetchEntries();
+    
+    setShowFillModal(false);
+    setSelectedWeekToFill('');
+    
+    const week = monthWeeks[weekIndex];
+    if (filledCount > 0) {
+      alert(`✅ ${filledCount} participant(s) rempli(s) pour la semaine ${week.displayWeek}`);
+    } else {
+      alert('Aucun participant à remplir pour cette semaine (tous ont déjà des données ou aucune valeur adjacente trouvée)');
+    }
+  }, [activeParticipants, monthWeeks, getCellEntry, addEntry, fetchEntries, isOwner, tuesdayNoonISO, entries]);
 
   // Import CSV
   const importMonthlyCSV = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -593,75 +743,93 @@ export default function MonthlyEntriesPage() {
       <HizbPageConverter />
 
       {/* header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex flex-col gap-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
             Saisie mensuelle
           </h1>
-          <p className="text-gray-600 dark:text-gray-400">
-            Tapez la position de fin de semaine (mardi→lundi). Vous pouvez
-            saisir <strong>0</strong> si la personne n'a rien lu : la position
-            précédente sera conservée, et Analytics comptera <strong>0</strong>.
+          <p className="text-gray-600 dark:text-gray-400 text-sm mt-1">
+            Saisissez la position de fin de semaine (mardi→lundi). '0' conserve la position précédente.
           </p>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col lg:flex-row gap-4 lg:items-center justify-between">
+          {/* Navigation Mois */}
+          <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 p-1 rounded-xl border border-slate-200 dark:border-slate-700 w-full lg:w-auto">
             <button
               onClick={() => navigateMonth('prev')}
-              className="p-2 text-gray-600 dark:text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400"
+              className="p-2 text-gray-600 dark:text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-all shadow-sm"
             >
               <ChevronLeft className="h-5 w-5" />
             </button>
-            <div className="text-center min-w-48">
-              <div className="text-sm font-medium text-gray-900 dark:text-white capitalize">
+            
+            <div className="text-center px-4">
+              <span className="text-sm font-bold text-gray-900 dark:text-white capitalize block">
                 {monthName}
-              </div>
+              </span>
             </div>
+
             <button
               onClick={() => navigateMonth('next')}
-              className="p-2 text-gray-600 dark:text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400"
+              className="p-2 text-gray-600 dark:text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-all shadow-sm"
             >
               <ChevronRight className="h-5 w-5" />
             </button>
           </div>
 
-          <input
-            type="month"
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-          />
+          {/* Actions Toolbar */}
+          <div className="flex flex-wrap gap-2 w-full lg:w-auto">
+            <div className="relative flex-grow lg:flex-grow-0">
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="w-full lg:w-auto border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-white dark:bg-slate-800 focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+              />
+            </div>
 
-          <button
-            onClick={() => fetchEntries()}
-            className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition-colors"
-          >
-            <Save className="h-4 w-4 mr-2" />
-            💾 Actualiser
-          </button>
-
-          <div className="flex gap-2">
             <button
-              onClick={exportMonthlyCSV}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              onClick={() => fetchEntries()}
+              className="flex-grow lg:flex-grow-0 flex items-center justify-center px-4 py-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-colors text-sm font-medium shadow-lg shadow-emerald-500/20"
             >
-              <Download className="h-4 w-4 mr-2" />
-              Export CSV
+              <Save className="h-4 w-4 mr-2" />
+              <span className="hidden sm:inline">Actualiser</span>
             </button>
 
-            {canEdit && (
-              <label className="flex items-center px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 transition-colors cursor-pointer">
-                <Upload className="h-4 w-4 mr-2" />
-                Import CSV
-                <input
-                  type="file"
-                  accept=".csv"
-                  onChange={importMonthlyCSV}
-                  className="hidden"
-                />
-              </label>
+            {isOwner && (
+              <button
+                onClick={() => setShowFillModal(true)}
+                className="flex-grow lg:flex-grow-0 flex items-center justify-center px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors text-sm font-medium shadow-lg shadow-purple-500/20"
+                title="Remplir automatiquement une semaine avec la moyenne des semaines adjacentes (réservé au propriétaire)"
+              >
+                <Sparkles className="h-4 w-4 mr-2" />
+                <span className="hidden sm:inline">Remplir auto</span>
+              </button>
             )}
+
+            <div className="flex gap-2 flex-grow lg:flex-grow-0">
+              <button
+                onClick={exportMonthlyCSV}
+                className="flex-1 flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors text-sm font-medium shadow-lg shadow-blue-500/20"
+                title="Export CSV"
+              >
+                <Download className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Export</span>
+              </button>
+
+              {canEdit && (
+                <label className="flex-1 flex items-center justify-center px-4 py-2 bg-orange-600 text-white rounded-xl hover:bg-orange-700 transition-colors cursor-pointer text-sm font-medium shadow-lg shadow-orange-500/20" title="Import CSV">
+                  <Upload className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Import</span>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={importMonthlyCSV}
+                    className="hidden"
+                  />
+                </label>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -877,6 +1045,121 @@ export default function MonthlyEntriesPage() {
           </div>
         </div>
       </div>
+
+      {/* Modal Remplissage Auto */}
+      {showFillModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white">Remplir automatiquement</h3>
+              <button 
+                onClick={() => {
+                  setShowFillModal(false);
+                  setSelectedWeekToFill('');
+                }} 
+                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">
+                  Sélectionner la semaine à remplir
+                </label>
+                <select
+                  value={selectedWeekToFill}
+                  onChange={(e) => setSelectedWeekToFill(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all text-slate-900 dark:text-white"
+                >
+                  <option value="">-- Choisir une semaine --</option>
+                  {monthWeeks.map((week) => {
+                    const hasData = activeParticipants.some(p => getCellEntry(p.id, week.weekKey));
+                    return (
+                      <option key={week.weekKey} value={week.weekKey}>
+                        {week.displayWeek} ({week.displayDate}) {hasData ? '⚠️ Déjà des données' : '✅ Vide'}
+                      </option>
+                    );
+                  })}
+                </select>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                  La semaine sera remplie avec la moyenne arrondie vers le haut des semaines précédente et suivante
+                </p>
+              </div>
+
+              {selectedWeekToFill && (() => {
+                const weekIndex = monthWeeks.findIndex(w => w.weekKey === selectedWeekToFill);
+                if (weekIndex === -1) return null;
+                
+                const week = monthWeeks[weekIndex];
+                const prevWeek = weekIndex > 0 ? monthWeeks[weekIndex - 1] : null;
+                const nextWeek = weekIndex < monthWeeks.length - 1 ? monthWeeks[weekIndex + 1] : null;
+                
+                // Vérifier les valeurs pour le premier participant (exemple)
+                const exampleParticipant = activeParticipants[0];
+                let prevValue: number | null = null;
+                let nextValue: number | null = null;
+                
+                if (prevWeek && exampleParticipant) {
+                  const prevEntry = getCellEntry(exampleParticipant.id, prevWeek.weekKey);
+                  if (prevEntry) prevValue = prevEntry.value_int;
+                }
+                if (nextWeek && exampleParticipant) {
+                  const nextEntry = getCellEntry(exampleParticipant.id, nextWeek.weekKey);
+                  if (nextEntry) nextValue = nextEntry.value_int;
+                }
+                
+                const calculatedValue = prevValue !== null && nextValue !== null
+                  ? Math.ceil((prevValue + nextValue) / 2)
+                  : prevValue !== null
+                  ? prevValue
+                  : nextValue !== null
+                  ? nextValue
+                  : null;
+
+                return (
+                  <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
+                    <p className="text-sm font-medium text-purple-900 dark:text-purple-100 mb-2">
+                      Aperçu du calcul :
+                    </p>
+                    <div className="text-xs text-purple-700 dark:text-purple-300 space-y-1">
+                      <div>Semaine précédente ({prevWeek?.displayWeek || 'N/A'}): {prevValue !== null ? `${prevValue} hizb` : 'Aucune donnée'}</div>
+                      <div>Semaine suivante ({nextWeek?.displayWeek || 'N/A'}): {nextValue !== null ? `${nextValue} hizb` : 'Aucune donnée'}</div>
+                      <div className="pt-2 border-t border-purple-200 dark:border-purple-700 font-bold">
+                        Valeur calculée : {calculatedValue !== null ? `${calculatedValue} hizb` : 'Impossible (pas de données adjacentes)'}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6 pt-6 border-t border-slate-100 dark:border-slate-800">
+              <button 
+                onClick={() => {
+                  setShowFillModal(false);
+                  setSelectedWeekToFill('');
+                }} 
+                className="px-5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 font-medium transition-colors"
+              >
+                Annuler
+              </button>
+              <button 
+                onClick={() => {
+                  if (selectedWeekToFill) {
+                    fillMissingWeek(selectedWeekToFill);
+                  }
+                }}
+                disabled={!selectedWeekToFill}
+                className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-purple-600 text-white hover:bg-purple-700 shadow-lg shadow-purple-500/20 font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Sparkles className="h-4 w-4" /> Remplir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

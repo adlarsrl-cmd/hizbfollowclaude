@@ -15,6 +15,7 @@ import {
   Menu,
   X,
   BookOpen,
+  Book,
   User,
   Bell,
   Search
@@ -118,6 +119,12 @@ export default function Layout() {
       icon: Edit3,
       allowedRoles: ['member', 'viewer'],
       hidden: currentUserRole === 'owner' || currentUserRole === 'manager'
+    },
+    {
+      name: 'Coran',
+      href: '/quran',
+      icon: Book,
+      allowedRoles: ['owner', 'manager', 'member', 'viewer']
     }
   ];
 

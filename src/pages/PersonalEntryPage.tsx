@@ -126,7 +126,10 @@ export default function PersonalEntryPage() {
       }
 
       setLastSaved(new Date());
-      await fetchEntries();
+      // Small delay before fetching to ensure DB has propagated the entry
+      setTimeout(async () => {
+        await fetchEntries();
+      }, 500);
     } catch (error) {
       console.error('Error saving entry:', error);
       alert('Erreur lors de la sauvegarde');

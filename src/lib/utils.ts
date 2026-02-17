@@ -1,5 +1,5 @@
 import { clsx, type ClassValue } from 'clsx';
-import { startOfWeek, addDays, getISOWeek, getYear } from 'date-fns';
+import { startOfWeek, addDays, getISOWeek, getYear, getISOWeekYear } from 'date-fns';
 import { TOTAL_HIZB, TOTAL_PAGES, CONVERSION_FACTORS } from './constants';
 
 /* ------------------------------ UI helpers ------------------------------ */
@@ -27,7 +27,9 @@ export function getJuzFromPages(pages: number): number {
 /** Clé de semaine alignée sur mardi : YYYY-Www-TUE */
 export function getWeekKeyTuesday(date: Date = new Date()): string {
   const tuesday = startOfWeek(date, { weekStartsOn: 2 }); // 2 = Tuesday
-  const year = getYear(tuesday);
+  // Use getISOWeekYear instead of getYear to handle year boundaries correctly
+  // (e.g., Dec 30 2025 might be in week 1 of 2026 according to ISO standard)
+  const year = getISOWeekYear(tuesday);
   const week = getISOWeek(tuesday);
   return `${year}-W${week.toString().padStart(2, '0')}-TUE`;
 }
