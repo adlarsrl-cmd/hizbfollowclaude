@@ -986,10 +986,8 @@ export default function QuranReaderPage() {
 
     const verseTajweedWords = new Map<string, string[]>();
     for (const verse of verses) {
-      verseTajweedWords.set(
-        verse.verse_key,
-        splitTajweedByWords(verse.text_uthmani_tajweed || verse.text_uthmani)
-      );
+      const processed = processTajweedHtml(verse.text_uthmani_tajweed || verse.text_uthmani);
+      verseTajweedWords.set(verse.verse_key, splitTajweedByWords(processed));
     }
 
     const surahFirstLine = new Map<number, number>();
@@ -1015,8 +1013,7 @@ export default function QuranReaderPage() {
       } else {
         const chunks = verseTajweedWords.get(word.verse_key) || [];
         const idx = verseWordIdx.get(word.verse_key) || 0;
-        const rawHtml = idx < chunks.length ? chunks[idx] : word.text_uthmani;
-        itemHtml = processTajweedHtml(rawHtml);
+        itemHtml = idx < chunks.length ? chunks[idx] : processTajweedHtml(word.text_uthmani);
         verseWordIdx.set(word.verse_key, idx + 1);
       }
 
