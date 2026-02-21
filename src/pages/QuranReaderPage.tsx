@@ -1039,7 +1039,8 @@ export default function QuranReaderPage() {
 
   // Position picker state
   const [showPositionPicker, setShowPositionPicker] = useState(false);
-  const [pickerValue, setPickerValue] = useState(1);
+  const [pickerValue, setPickerValue] = useState(1);   // numeric (for progress bar, +/-)
+  const [pickerInputStr, setPickerInputStr] = useState('1'); // string (for the editable input)
 
   // Swipe gesture state
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
@@ -1659,7 +1660,7 @@ export default function QuranReaderPage() {
 
             {/* Current Position (center) — clickable to open picker */}
             <button
-              onClick={() => { setPickerValue(viewMode === 'page' ? currentPage : viewMode === 'hizb' ? currentHizb : currentSurah); setShowPositionPicker(true); }}
+              onClick={() => { const v = viewMode === 'page' ? currentPage : viewMode === 'hizb' ? currentHizb : currentSurah; setPickerValue(v); setPickerInputStr(String(v)); setShowPositionPicker(true); }}
               className={`flex flex-col items-center px-2 min-w-0 max-w-[110px] rounded-xl py-1 transition-colors active:scale-95 ${isDark ? 'hover:bg-gray-700/50 active:bg-gray-700' : 'hover:bg-gray-100 active:bg-gray-200'}`}
             >
               <span className={`text-sm font-bold font-arabic truncate w-full text-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
@@ -1940,66 +1941,83 @@ export default function QuranReaderPage() {
               </p>
 
               {/* Number picker */}
-              <div className="flex items-center justify-center gap-5 mb-4">
-                <button
-                  onPointerDown={() => {
-                    setPickerValue(v => Math.max(1, v - 1));
-                  }}
-                  onClick={() => setPickerValue(v => Math.max(1, v - 1))}
-                  className={`w-14 h-14 rounded-2xl text-2xl font-bold transition-all active:scale-90 ${isDark ? 'bg-gray-800 text-white hover:bg-gray-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                >
-                  −
-                </button>
+              {(() => {
+                const max = viewMode === 'page' ? TOTAL_PAGES : viewMode === 'hizb' ? TOTAL_HIZB : 114;
+                const bump = (delta: number) => {
+                  const next = Math.min(max, Math.max(1, pickerValue + delta));
+                  setPickerValue(next);
+                  setPickerInputStr(String(next));
+                };
+                const confirmedValue = Math.min(max, Math.max(1, parseInt(pickerInputStr) || pickerValue));
+                return (
+                  <>
+                    <div className="flex items-center justify-center gap-5 mb-4">
+                      <button
+                        onClick={() => bump(-1)}
+                        className={`w-14 h-14 rounded-2xl text-2xl font-bold transition-all active:scale-90 ${isDark ? 'bg-gray-800 text-white hover:bg-gray-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                      >
+                        −
+                      </button>
 
-                <input
-                  type="number"
-                  min={1}
-                  max={viewMode === 'page' ? TOTAL_PAGES : viewMode === 'hizb' ? TOTAL_HIZB : 114}
-                  value={pickerValue}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value) || 1;
-                    const max = viewMode === 'page' ? TOTAL_PAGES : viewMode === 'hizb' ? TOTAL_HIZB : 114;
-                    setPickerValue(Math.min(max, Math.max(1, v)));
-                  }}
-                  className={`text-6xl font-bold w-36 text-center bg-transparent border-none outline-none appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${isDark ? 'text-white' : 'text-gray-900'}`}
-                />
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={max}
+                        value={pickerInputStr}
+                        autoFocus
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setPickerInputStr(raw);
+                          const v = parseInt(raw);
+                          if (!isNaN(v) && v >= 1 && v <= max) setPickerValue(v);
+                        }}
+                        onBlur={() => {
+                          // Re-clamp on blur so progress bar stays accurate
+                          const v = parseInt(pickerInputStr);
+                          if (isNaN(v) || v < 1) { setPickerInputStr(String(pickerValue)); }
+                          else { const clamped = Math.min(max, v); setPickerValue(clamped); setPickerInputStr(String(clamped)); }
+                        }}
+                        className={`text-6xl font-bold w-36 text-center bg-transparent border-none outline-none appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${isDark ? 'text-white' : 'text-gray-900'}`}
+                      />
 
-                <button
-                  onClick={() => {
-                    const max = viewMode === 'page' ? TOTAL_PAGES : viewMode === 'hizb' ? TOTAL_HIZB : 114;
-                    setPickerValue(v => Math.min(max, v + 1));
-                  }}
-                  className={`w-14 h-14 rounded-2xl text-2xl font-bold transition-all active:scale-90 ${isDark ? 'bg-gray-800 text-white hover:bg-gray-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                >
-                  +
-                </button>
-              </div>
+                      <button
+                        onClick={() => bump(1)}
+                        className={`w-14 h-14 rounded-2xl text-2xl font-bold transition-all active:scale-90 ${isDark ? 'bg-gray-800 text-white hover:bg-gray-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                      >
+                        +
+                      </button>
+                    </div>
 
-              {/* Progress sub-label */}
-              <p className={`text-center text-sm mb-2 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                sur {viewMode === 'page' ? TOTAL_PAGES : viewMode === 'hizb' ? TOTAL_HIZB : 114}
-              </p>
+                    {/* Progress sub-label */}
+                    <p className={`text-center text-sm mb-2 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                      sur {max}
+                    </p>
 
-              {/* Progress bar */}
-              <div className={`h-1.5 rounded-full mb-6 overflow-hidden ${isDark ? 'bg-gray-800' : 'bg-gray-200'}`}>
-                <div
-                  className="h-full bg-emerald-500 rounded-full transition-all"
-                  style={{ width: `${Math.round((pickerValue / (viewMode === 'page' ? TOTAL_PAGES : viewMode === 'hizb' ? TOTAL_HIZB : 114)) * 100)}%` }}
-                />
-              </div>
+                    {/* Progress bar */}
+                    <div className={`h-1.5 rounded-full mb-6 overflow-hidden ${isDark ? 'bg-gray-800' : 'bg-gray-200'}`}>
+                      <div
+                        className="h-full bg-emerald-500 rounded-full transition-all"
+                        style={{ width: `${Math.round((pickerValue / max) * 100)}%` }}
+                      />
+                    </div>
 
-              <button
-                onClick={() => {
-                  if (viewMode === 'page') setCurrentPage(pickerValue);
-                  else if (viewMode === 'hizb') setCurrentHizb(pickerValue);
-                  else { setCurrentSurah(pickerValue); setCurrentVersePage(1); }
-                  setShowPositionPicker(false);
-                  scrollToTop();
-                }}
-                className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-base transition-all active:scale-[0.98]"
-              >
-                Confirmer
-              </button>
+                    <button
+                      onClick={() => {
+                        if (viewMode === 'page') setCurrentPage(confirmedValue);
+                        else if (viewMode === 'hizb') setCurrentHizb(confirmedValue);
+                        else { setCurrentSurah(confirmedValue); setCurrentVersePage(1); }
+                        setShowPositionPicker(false);
+                        scrollToTop();
+                      }}
+                      className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-base transition-all active:scale-[0.98]"
+                    >
+                      Confirmer
+                    </button>
+                  </>
+                );
+              })()}
             </div>
           </>
         )}
