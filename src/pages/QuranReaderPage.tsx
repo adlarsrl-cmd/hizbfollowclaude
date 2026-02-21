@@ -21,11 +21,12 @@ import {
 } from 'lucide-react';
 import {
   getSurahs,
-  getPageVerses,
+  getPageWithWords,
   getSurahVerses,
   getHizbVerses,
   type Surah,
   type VerseWithTranslation,
+  type WordWithLine,
   TOTAL_PAGES,
   TOTAL_HIZB
 } from '../lib/quranApi';
@@ -231,6 +232,70 @@ const tajweedStyles = `
       word-spacing: 4px;
       line-height: 2.4;
     }
+  }
+
+  /* ===== MUSHAF PAGE — inline verse number ===== */
+  .verse-number-inline {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    margin: 0 3px;
+    font-family: 'Amiri Quran', serif;
+    font-size: 11px;
+    color: #e8d5a0;
+    font-weight: bold;
+    line-height: 1;
+    vertical-align: middle;
+    position: relative;
+    z-index: 0;
+  }
+  .verse-number-inline::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url('/frameverse.png');
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    filter: invert(1) sepia(0.4) saturate(1.5) brightness(0.95);
+    z-index: -1;
+  }
+  .quran-light .verse-number-inline {
+    color: #3a2800;
+  }
+  .quran-light .verse-number-inline::before {
+    filter: none;
+  }
+
+  /* ===== MUSHAF PAGE — surah header box ===== */
+  .surah-header-box {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 28px;
+    border-radius: 9999px;
+    border: 1px solid rgba(180,130,30,0.35);
+    background: rgba(180,130,30,0.08);
+  }
+  .quran-light .surah-header-box {
+    border-color: rgba(160,110,20,0.3);
+    background: rgba(255,248,220,0.8);
+  }
+
+  /* ===== MUSHAF LINE LAYOUT ===== */
+  .mushaf-page {
+    direction: rtl;
+    width: 100%;
+  }
+  .mushaf-line {
+    display: block;
+    direction: rtl;
+    text-align: justify;
+    text-align-last: justify;
+    width: 100%;
+    padding: 0.15em 0;
   }
 
   /* ===== VERSE INTERACTIONS ===== */
@@ -649,6 +714,53 @@ function processTajweedHtml(html: string): string {
   return finalResult;
 }
 
+/** Convert Western digits to Arabic-Indic numerals (١٢٣…) */
+const toArabicNumerals = (n: number): string =>
+  n.toString().replace(/\d/g, d => '٠١٢٣٤٥٦٧٨٩'[+d]);
+
+/** Hizb + quarter label from rub_el_hizb_number (1-240) */
+function hizbQuarterLabel(hizb: number, rub: number): string {
+  const q = (rub - 1) % 4;
+  const fractions = ['', ' ¼', ' ½', ' ¾'];
+  return `Hizb ${hizb}${fractions[q]}`;
+}
+
+/**
+ * Split verse tajweed HTML into word-level chunks.
+ * Words are separated by spaces occurring OUTSIDE of <tajweed> tags.
+ */
+function splitTajweedByWords(html: string): string[] {
+  if (!html) return [];
+  const parts: string[] = [];
+  let current = '';
+  let i = 0;
+  let depth = 0;
+
+  while (i < html.length) {
+    if (html[i] === '<') {
+      const tagEnd = html.indexOf('>', i);
+      if (tagEnd === -1) { current += html.slice(i); break; }
+      const tagContent = html.slice(i + 1, tagEnd);
+      const isClosing = tagContent.startsWith('/');
+      const isSelfClosing = tagContent.endsWith('/');
+      current += html.slice(i, tagEnd + 1);
+      if (!isClosing && !isSelfClosing) depth++;
+      else if (isClosing) depth = Math.max(0, depth - 1);
+      i = tagEnd + 1;
+    } else if (html[i] === ' ' && depth === 0) {
+      if (current.trim()) parts.push(current.trim());
+      current = '';
+      i++;
+      while (i < html.length && html[i] === ' ') i++;
+    } else {
+      current += html[i];
+      i++;
+    }
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
 export default function QuranReaderPage() {
   const navigate = useNavigate();
   const { error: showError, warning: showWarning } = useToast();
@@ -691,6 +803,9 @@ export default function QuranReaderPage() {
   const [surahDrawerTab, setSurahDrawerTab] = useState<'surah' | 'hizb'>('surah');
   const [showSettings, setShowSettings] = useState(false);
   
+  // Page mode word-level data (for exact mushaf line layout)
+  const [pageWords, setPageWords] = useState<WordWithLine[]>([]);
+
   // Verse interaction
   const [selectedVerse, setSelectedVerse] = useState<VerseWithTranslation | null>(null);
   const [showVerseMenu, setShowVerseMenu] = useState(false);
@@ -768,9 +883,11 @@ export default function QuranReaderPage() {
     const loadVerses = async () => {
       try {
         let data: VerseWithTranslation[] = [];
-        
+
         if (viewMode === 'page') {
-          data = await getPageVerses(currentPage);
+          const result = await getPageWithWords(currentPage);
+          data = result.verses;
+          setPageWords(result.allWords);
           setTotalVersePages(1);
           setCurrentVersePage(1);
         } else if (viewMode === 'surah') {
@@ -840,6 +957,90 @@ export default function QuranReaderPage() {
     const surahNumber = parseInt(firstVerseKey.split(':')[0]);
     return surahs.find(s => s.id === surahNumber);
   }, [currentSurah, surahs, viewMode, verses]);
+
+  // Mushaf page metadata (used when viewMode === 'page')
+  const pageInfo = useMemo(() => {
+    if (viewMode !== 'page' || verses.length === 0) return null;
+    const first = verses[0];
+    const surahNum = parseInt(first.verse_key.split(':')[0]);
+    const surahInfo = surahs.find(s => s.id === surahNum);
+    return {
+      surahName: surahInfo?.translated_name?.name || surahInfo?.name_simple || '',
+      juz: first.juz_number,
+      hizbLabel: hizbQuarterLabel(first.hizb_number, first.rub_el_hizb_number ?? 1),
+    };
+  }, [verses, surahs, viewMode]);
+
+  // Exact mushaf line layout: words grouped by line_number with tajweed applied per word
+  interface MushafRenderLine {
+    lineNum: number;
+    html: string;
+    newSurahBefore?: { surahNum: number; hasBismillah: boolean };
+  }
+
+  const mushafLines = useMemo((): MushafRenderLine[] => {
+    if (viewMode !== 'page' || pageWords.length === 0 || verses.length === 0) return [];
+
+    // Build verse → tajweed word chunks (split by spaces outside <tajweed> tags)
+    const verseTajweedWords = new Map<string, string[]>();
+    for (const verse of verses) {
+      verseTajweedWords.set(
+        verse.verse_key,
+        splitTajweedByWords(verse.text_uthmani_tajweed || verse.text_uthmani)
+      );
+    }
+
+    // Track which surah starts on which line (verse_number === 1 present on page)
+    const surahFirstLine = new Map<number, number>();
+    for (const word of pageWords) {
+      const verseNum = parseInt(word.verse_key.split(':')[1]);
+      const surahNum = parseInt(word.verse_key.split(':')[0]);
+      if (verseNum === 1 && !surahFirstLine.has(surahNum)) {
+        surahFirstLine.set(surahNum, word.line_number);
+      }
+    }
+
+    // Build line → html items
+    const lineHtmlItems = new Map<number, string[]>();
+    const verseWordIdx = new Map<string, number>();
+
+    for (const word of pageWords) {
+      const lineNum = word.line_number;
+      if (!lineHtmlItems.has(lineNum)) lineHtmlItems.set(lineNum, []);
+
+      let itemHtml = '';
+      if (word.char_type_name === 'end') {
+        const verseNum = parseInt(word.verse_key.split(':')[1]);
+        itemHtml = `<span class="verse-number-inline">${toArabicNumerals(verseNum)}</span>`;
+      } else {
+        const chunks = verseTajweedWords.get(word.verse_key) || [];
+        const idx = verseWordIdx.get(word.verse_key) || 0;
+        const rawHtml = idx < chunks.length ? chunks[idx] : word.text_uthmani;
+        itemHtml = processTajweedHtml(rawHtml);
+        verseWordIdx.set(word.verse_key, idx + 1);
+      }
+
+      lineHtmlItems.get(lineNum)!.push(itemHtml);
+    }
+
+    const sortedLineNums = [...lineHtmlItems.keys()].sort((a, b) => a - b);
+
+    return sortedLineNums.map(lineNum => {
+      // Find if a surah starts at this line
+      let newSurahBefore: MushafRenderLine['newSurahBefore'];
+      for (const [surahNum, firstLine] of surahFirstLine.entries()) {
+        if (firstLine === lineNum) {
+          newSurahBefore = { surahNum, hasBismillah: surahNum !== 1 && surahNum !== 9 };
+          break;
+        }
+      }
+      return {
+        lineNum,
+        html: lineHtmlItems.get(lineNum)!.join(' '),
+        newSurahBefore,
+      };
+    });
+  }, [viewMode, pageWords, verses]);
 
   // Navigation handlers
   const goToNext = () => {
@@ -1185,7 +1386,58 @@ export default function QuranReaderPage() {
                   Réessayer
                 </button>
               </div>
+            ) : viewMode === 'page' ? (
+              /* ── MUSHAF VIEW — exact line layout matching physical Mushaf ── */
+              <div className="mushaf-page">
+                {/* Page info header */}
+                {pageInfo && (
+                  <div className={`flex items-center justify-between text-xs pb-3 mb-5 border-b ${isDark ? 'text-gray-500 border-gray-800' : 'text-gray-400 border-gray-200'}`}>
+                    <span className="font-medium">{pageInfo.surahName}</span>
+                    <span>Juz {pageInfo.juz} · {pageInfo.hizbLabel}</span>
+                    <span className="font-medium">Page {currentPage}</span>
+                  </div>
+                )}
+
+                {/* Mushaf lines — each line is one row of the physical Mushaf */}
+                {mushafLines.map((line) => {
+                  const si = line.newSurahBefore
+                    ? surahs.find(s => s.id === line.newSurahBefore!.surahNum)
+                    : null;
+                  return (
+                    <React.Fragment key={line.lineNum}>
+                      {/* Surah name header before the line where a new surah starts */}
+                      {line.newSurahBefore && (
+                        <div className="text-center my-5">
+                          <div className="surah-header-box">
+                            <span
+                              className={`text-lg font-bold ${isDark ? 'text-amber-200' : 'text-amber-900'}`}
+                              style={{ fontFamily: "'Amiri Quran', serif" }}
+                            >
+                              سُورَة {si?.name_arabic}
+                            </span>
+                            {si?.translated_name?.name && (
+                              <span className={`text-xs font-medium ${isDark ? 'text-amber-500' : 'text-amber-700'}`}>
+                                {si.translated_name.name}
+                              </span>
+                            )}
+                          </div>
+                          {line.newSurahBefore.hasBismillah && (
+                            <p className={`bismillah-text mt-4 ${fontFamily === 'noto' ? 'font-noto' : ''}`}>﷽</p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* The line itself */}
+                      <div
+                        className={`mushaf-line tajweed-text ${fontFamily === 'noto' ? 'font-noto' : ''} ${fontSizes[fontSize]}`}
+                        dangerouslySetInnerHTML={{ __html: line.html }}
+                      />
+                    </React.Fragment>
+                  );
+                })}
+              </div>
             ) : (
+              /* ── VERSE-BY-VERSE VIEW (surah / hizb modes) ── */
               <div className="space-y-2">
                 {/* Bismillah — shown when first verse is verse 1 of a surah (except Al-Fatiha and At-Tawbah) */}
                 {(() => {

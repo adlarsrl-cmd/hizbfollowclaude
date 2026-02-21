@@ -43,7 +43,8 @@ export default function AnalyticsPage() {
     currentUnit,
     fetchParticipants,
     fetchEntries,
-    loading
+    loading,
+    currentUserRole
   } = useAppStore();
 
   const isLoading = loading.participants || loading.entries;
@@ -364,6 +365,67 @@ export default function AnalyticsPage() {
     return { activeParticipants: active, thisWeekEntries: count, thisWeekTotal: total };
   }, [participants, byParticipant]);
 
+  // ── Member-specific computations ──────────────────────────────────────
+  const memberParticipant = useMemo(
+    () => (currentUserRole === 'member' ? participants[0] ?? null : null),
+    [currentUserRole, participants]
+  );
+
+  const memberStats = useMemo(() => {
+    if (!memberParticipant) return null;
+    const target = memberParticipant.weekly_target_hizb || 7;
+    const weeklyDeltas = calculateWeeklyDeltas(entries, memberParticipant.id);
+    const totalHizb = weeklyDeltas.reduce((s, w) => s + w.delta, 0);
+    const khatmas = Math.floor(totalHizb / 60);
+    const progressInCycle = totalHizb % 60;
+
+    const last8 = weeklyDeltas.slice(-8);
+    const weeklyAverage = last8.length
+      ? Math.round((last8.reduce((s, w) => s + w.delta, 0) / last8.length) * 10) / 10
+      : 0;
+    const bestVal = weeklyDeltas.reduce((m, w) => Math.max(m, w.delta), 0);
+
+    let currentStreak = 0;
+    for (let i = weeklyDeltas.length - 1; i >= 0; i--) {
+      if (weeklyDeltas[i].delta >= target) currentStreak++;
+      else break;
+    }
+
+    const hizbRetard = calculateHizbRetard(entries, memberParticipant.id, target);
+
+    let prediction: string | null = null;
+    if (weeklyAverage > 0) {
+      const remaining = Math.max(0, 60 - progressInCycle);
+      const weeksRemaining = Math.ceil(remaining / weeklyAverage);
+      const d = new Date();
+      d.setDate(d.getDate() + weeksRemaining * 7);
+      prediction = d.toLocaleDateString('fr-FR');
+    }
+
+    return { khatmas, progressInCycle, weeklyAverage, bestVal, currentStreak, hizbRetard, prediction, target };
+  }, [memberParticipant, entries]);
+
+  const memberChartData = useMemo(() => {
+    if (!memberParticipant) return [];
+    const weeklyDeltas = calculateWeeklyDeltas(entries, memberParticipant.id);
+    const deltaMap = new Map(weeklyDeltas.map(w => [w.week, w.delta]));
+    const now = new Date();
+    const weeks = [];
+    for (let i = 7; i >= 0; i--) {
+      const anchor = new Date(now);
+      anchor.setDate(anchor.getDate() - i * 7);
+      const weekKey = getWeekKeyTuesday(anchor);
+      const weekNum = weekKey.split('-W')[1]?.replace('-TUE', '') || '';
+      const tue = parseWeekKeyTuesday(weekKey);
+      weeks.push({
+        label: tue.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
+        value: deltaMap.get(weekNum) || 0
+      });
+    }
+    return weeks;
+  }, [memberParticipant, entries]);
+  // ───────────────────────────────────────────────────────────────────────
+
   // export CSV (classement mensuel)
   const exportCSV = () => {
     const data = monthlyData.map(item => ({
@@ -383,6 +445,168 @@ export default function AnalyticsPage() {
   };
 
   const colors = ['#059669', '#0891b2', '#7c3aed', '#dc2626', '#ea580c', '#ca8a04', '#0ea5e9', '#16a34a'];
+
+  /* ── Member view ─────────────────────────────────────────────────── */
+  if (currentUserRole === 'member') {
+    if (isLoading) {
+      return (
+        <div className="max-w-sm mx-auto px-4 pt-4 pb-12 flex flex-col gap-8">
+          <Skeleton className="h-16 w-48 rounded-2xl" />
+          <div className="grid grid-cols-2 gap-3">
+            {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}
+          </div>
+          <Skeleton className="h-2 rounded-full" />
+          <Skeleton className="h-40 rounded-2xl" />
+        </div>
+      );
+    }
+
+    if (!memberParticipant || !memberStats) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[50vh] text-center px-6">
+          <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4 text-2xl">📊</div>
+          <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Aucune donnée</h3>
+          <p className="text-sm text-slate-500 dark:text-slate-400 max-w-xs">Ajoutez des entrées pour voir vos statistiques.</p>
+        </div>
+      );
+    }
+
+    const { khatmas, progressInCycle, weeklyAverage, bestVal, currentStreak, hizbRetard, prediction, target } = memberStats;
+
+    return (
+      <div className="max-w-sm mx-auto px-4 pt-4 pb-12 flex flex-col gap-8">
+
+        {/* Header */}
+        <div>
+          <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">Mes statistiques</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white leading-tight">{memberParticipant.name}</h1>
+          <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">
+            {khatmas} khatma{khatmas > 1 ? 's' : ''} · objectif {target} {currentUnit}/sem
+          </p>
+        </div>
+
+        {/* KPI 2×2 */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-slate-100 dark:bg-slate-800 rounded-2xl p-4">
+            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">Moyenne (8 sem)</p>
+            <p className="text-3xl font-bold text-slate-900 dark:text-white">{weeklyAverage}</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">hizb/sem</p>
+          </div>
+          <div className="bg-slate-100 dark:bg-slate-800 rounded-2xl p-4">
+            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">Record hebdo</p>
+            <p className="text-3xl font-bold text-slate-900 dark:text-white">{bestVal}</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">hizb</p>
+          </div>
+          <div className="bg-slate-100 dark:bg-slate-800 rounded-2xl p-4">
+            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">Série actuelle</p>
+            <p className="text-3xl font-bold text-slate-900 dark:text-white">
+              {currentStreak > 0 ? currentStreak : '—'}
+            </p>
+            {currentStreak > 0 && <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">sem 🔥</p>}
+          </div>
+          <div className={`rounded-2xl p-4 ${
+            hizbRetard.status === 'retard'
+              ? 'bg-rose-50 dark:bg-rose-900/20'
+              : hizbRetard.status === 'avance'
+              ? 'bg-blue-50 dark:bg-blue-900/20'
+              : 'bg-emerald-50 dark:bg-emerald-900/20'
+          }`}>
+            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">Statut</p>
+            <p className={`text-3xl font-bold ${
+              hizbRetard.status === 'retard'
+                ? 'text-rose-600 dark:text-rose-400'
+                : hizbRetard.status === 'avance'
+                ? 'text-blue-600 dark:text-blue-400'
+                : 'text-emerald-600 dark:text-emerald-400'
+            }`}>
+              {hizbRetard.status === 'retard'
+                ? `-${hizbRetard.retard}`
+                : hizbRetard.status === 'avance'
+                ? `+${hizbRetard.retard}`
+                : '✓'}
+            </p>
+            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+              {hizbRetard.status === 'retard'
+                ? 'hizb de retard'
+                : hizbRetard.status === 'avance'
+                ? "hizb d'avance"
+                : 'À jour'}
+            </p>
+          </div>
+        </div>
+
+        {/* Progress cycle */}
+        <div className="space-y-1.5">
+          <div className="flex justify-between text-xs text-slate-400 dark:text-slate-500">
+            <span>Cycle en cours · hizb {progressInCycle} / 60</span>
+            <span>{Math.round(progressInCycle / 60 * 100)}%</span>
+          </div>
+          <div className="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+              style={{ width: `${Math.max(2, progressInCycle / 60 * 100)}%` }}
+            />
+          </div>
+          {prediction && (
+            <p className="text-xs text-slate-400 dark:text-slate-500 pt-0.5">
+              Khatma estimée le{' '}
+              <span className="text-purple-600 dark:text-purple-400 font-medium">{prediction}</span>
+            </p>
+          )}
+        </div>
+
+        {/* Weekly chart */}
+        <div>
+          <p className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4">
+            8 dernières semaines
+          </p>
+          <div className="h-44">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={memberChartData} margin={{ top: 4, right: 0, left: -24, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 9, fill: '#94a3b8' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <ReferenceLine
+                  y={target}
+                  stroke="#10b981"
+                  strokeDasharray="4 4"
+                  strokeWidth={1.5}
+                />
+                <Tooltip
+                  formatter={(v: any) => [`${v} hizb`, 'Lecture']}
+                  contentStyle={{
+                    background: 'rgba(15,23,42,0.92)',
+                    border: 'none',
+                    borderRadius: '12px',
+                    color: '#f1f5f9',
+                    fontSize: 12,
+                    padding: '8px 12px'
+                  }}
+                  cursor={{ fill: 'rgba(16,185,129,0.08)' }}
+                  labelStyle={{ color: '#94a3b8', fontSize: 10 }}
+                />
+                <Bar dataKey="value" fill="#059669" radius={[4, 4, 0, 0]} maxBarSize={28} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500 text-center mt-1">
+            — objectif {target} hizb/sem
+          </p>
+        </div>
+
+      </div>
+    );
+  }
+  /* ──────────────────────────────────────────────────────────────────── */
 
   return (
     <div className="space-y-6">

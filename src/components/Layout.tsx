@@ -1,16 +1,16 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { 
-  Home, 
-  Users, 
-  BarChart3, 
-  Settings, 
-  CreditCard as Edit3, 
-  WifiOff, 
-  Moon, 
-  Sun, 
-  Monitor, 
-  ChevronDown, 
+  Home,
+  Users,
+  BarChart3,
+  Settings,
+  CreditCard as Edit3,
+  WifiOff,
+  Moon,
+  Sun,
+  Monitor,
+  ChevronDown,
   LogOut,
   Menu,
   X,
@@ -18,7 +18,8 @@ import {
   Book,
   User,
   Bell,
-  Search
+  Search,
+  Sparkles
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import GroupSelector from './GroupSelector';
@@ -111,7 +112,7 @@ export default function Layout() {
       name: 'Saisie Mensuelle',
       href: '/monthly',
       icon: BookOpen,
-      allowedRoles: ['owner', 'manager', 'member', 'viewer']
+      allowedRoles: ['owner', 'manager']
     },
     {
       name: 'Ma Saisie',
@@ -124,6 +125,12 @@ export default function Layout() {
       name: 'Coran',
       href: '/quran',
       icon: Book,
+      allowedRoles: ['owner', 'manager', 'member', 'viewer']
+    },
+    {
+      name: 'Ramadan',
+      href: '/ramadan',
+      icon: Sparkles,
       allowedRoles: ['owner', 'manager', 'member', 'viewer']
     }
   ];

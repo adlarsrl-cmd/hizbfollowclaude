@@ -117,6 +117,58 @@ export async function getSurahVerses(
   return { verses: data.verses, pagination: data.pagination };
 }
 
+export interface WordWithLine {
+  id: number;
+  position: number;
+  text_uthmani: string;
+  line_number: number;
+  page_number: number;
+  char_type_name: string; // 'word' | 'end' | 'pause'
+  verse_key: string;
+}
+
+/**
+ * Récupère les versets d'une page avec les mots et leurs numéros de ligne.
+ * Permet de reproduire la mise en page exacte du Mushaf (15 lignes, même layout).
+ */
+export async function getPageWithWords(
+  pageNumber: number,
+  translations: number[] = [136]
+): Promise<{ verses: VerseWithTranslation[]; allWords: WordWithLine[] }> {
+  const cacheKey = `page-words-${pageNumber}-${translations.join(',')}`;
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+  const translationsParam = translations.length > 0 ? `&translations=${translations.join(',')}` : '';
+  const response = await fetch(
+    `${API_BASE}/verses/by_page/${pageNumber}?language=fr&words=true&word_fields=text_uthmani,line_number,page_number,char_type_name&fields=text_uthmani_tajweed,juz_number,hizb_number,rub_el_hizb_number&text_type=uthmani${translationsParam}`
+  );
+  const data = await response.json();
+
+  const allWords: WordWithLine[] = [];
+  for (const verse of (data.verses || [])) {
+    for (const word of (verse.words || [])) {
+      allWords.push({
+        id: word.id,
+        position: word.position,
+        text_uthmani: word.text_uthmani || word.text || '',
+        line_number: word.line_number,
+        page_number: word.page_number ?? pageNumber,
+        char_type_name: word.char_type_name ?? 'word',
+        verse_key: verse.verse_key,
+      });
+    }
+  }
+
+  // Strip `words` array from verses (not part of VerseWithTranslation)
+  const verses: VerseWithTranslation[] = (data.verses || []).map(
+    ({ words: _w, ...rest }: any) => rest
+  );
+
+  const result = { verses, allWords };
+  cache.set(cacheKey, result);
+  return result;
+}
+
 /**
  * Récupère les versets d'une page du Mushaf (604 pages total)
  */

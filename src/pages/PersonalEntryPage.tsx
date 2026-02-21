@@ -1,11 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Save, User, Target, Award, RotateCcw, MapPin } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Minus, Plus, RotateCcw, MapPin, MessageSquare, ChevronDown } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
+import { supabase } from '../lib/supabase';
 import {
-  getWeekKeyTuesday,
-  parseWeekKeyTuesday,
   getWeekBoundsTuesday,
-  tuesdayNoonISO,
   detectNewKhatma,
   getLastRealEntry
 } from '../lib/utils';
@@ -27,83 +25,84 @@ export default function PersonalEntryPage() {
   const [value, setValue] = useState<number>(1);
   const [note, setNote] = useState<string>('');
   const [saving, setSaving] = useState(false);
-  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [saved, setSaved] = useState(false);
   const [isNewKhatma, setIsNewKhatma] = useState(false);
   const [isStartingPoint, setIsStartingPoint] = useState(false);
+  const [showNote, setShowNote] = useState(false);
+  const [hasExistingEntry, setHasExistingEntry] = useState(false);
 
-  // Fetch user's own participants
   useEffect(() => {
     fetchMyParticipants();
     fetchEntries();
   }, []);
 
-  // Auto-select first participant if only one
   useEffect(() => {
     if (participants.length === 1 && !selectedParticipantId) {
       setSelectedParticipantId(participants[0].id);
     }
   }, [participants, selectedParticipantId]);
 
-  // Load existing entry for selected participant
   useEffect(() => {
     if (!selectedParticipantId) return;
-
     const now = new Date();
     const { start: weekStart, end: weekEnd } = getWeekBoundsTuesday(now);
-
     const existingEntry = entries
       .filter(e => e.participant_id === selectedParticipantId)
       .find(e => {
-        const entryDate = new Date(e.recorded_at);
-        return entryDate >= weekStart && entryDate <= weekEnd;
+        const d = new Date(e.recorded_at);
+        return d >= weekStart && d <= weekEnd;
       });
-
     if (existingEntry) {
       setValue(existingEntry.value_int);
       setNote(existingEntry.note || '');
+      setHasExistingEntry(true);
     } else {
-      // Load last position
       const lastEntry = getLastRealEntry(entries, selectedParticipantId);
       setValue(lastEntry ? lastEntry.value_int : 1);
       setNote('');
+      setHasExistingEntry(false);
     }
-    // Reset action buttons on participant change
     setIsNewKhatma(false);
     setIsStartingPoint(false);
+    setSaved(false);
+    setShowNote(false);
   }, [selectedParticipantId, entries]);
 
   const selectedParticipant = participants.find(p => p.id === selectedParticipantId);
+  const maxValue = currentUnit === 'hizb' ? 60 : 604;
+  const progress = value > 0 ? Math.round((value / maxValue) * 100) : 0;
+
+  const weekLabel = (() => {
+    const { start, end } = getWeekBoundsTuesday(new Date());
+    return `${start.getDate()} – ${end.getDate()} ${end.toLocaleString('fr-FR', { month: 'long' })}`;
+  })();
+
+  const increment = () => { setValue(v => Math.min(v + 1, maxValue)); setSaved(false); };
+  const decrement = () => { setValue(v => Math.max(v - 1, 0)); setSaved(false); };
 
   const handleSave = async () => {
-    if (!selectedParticipant || !value) return;
-
+    if (!selectedParticipant) return;
     setSaving(true);
     try {
       const now = new Date();
       const { start: weekStart, end: weekEnd } = getWeekBoundsTuesday(now);
-      const weekKey = getWeekKeyTuesday(now);
-
-      // Check for existing entry this week
       const existingEntry = entries
         .filter(e => e.participant_id === selectedParticipantId)
         .find(e => {
-          const entryDate = new Date(e.recorded_at);
-          return entryDate >= weekStart && entryDate <= weekEnd;
+          const d = new Date(e.recorded_at);
+          return d >= weekStart && d <= weekEnd;
         });
-
       const lastEntry = getLastRealEntry(entries, selectedParticipantId);
       let cycleNumber = selectedParticipant.cycle_number;
       let finalNote = note;
 
-      // Handle manual new khatma toggle
       if (isNewKhatma && !existingEntry) {
         const baseCycle = lastEntry ? lastEntry.cycle_number : selectedParticipant.cycle_number;
         cycleNumber = baseCycle + 1;
         finalNote = finalNote ? `${finalNote} (Nouvelle Khatma)` : 'Nouvelle Khatma';
       } else if (!existingEntry && lastEntry && !isStartingPoint) {
-        // Auto-detect new khatma only if not a starting point
-        const newCycleDetected = detectNewKhatma(value, lastEntry.value_int, currentUnit);
-        if (newCycleDetected) {
+        const detected = detectNewKhatma(value, lastEntry.value_int, currentUnit);
+        if (detected) {
           cycleNumber = lastEntry.cycle_number + 1;
           finalNote = finalNote ? `${finalNote} (Nouvelle Khatma détectée)` : 'Nouvelle Khatma détectée';
         }
@@ -112,7 +111,6 @@ export default function PersonalEntryPage() {
       const entrySource = isStartingPoint ? 'starting_point' : 'manual';
 
       if (existingEntry) {
-        // Update existing entry
         await updateEntry(existingEntry.id, {
           value_int: value,
           cycle_number: cycleNumber,
@@ -120,7 +118,6 @@ export default function PersonalEntryPage() {
           recorded_at: new Date().toISOString()
         });
       } else {
-        // Create new entry
         await addEntry({
           participant_id: selectedParticipantId,
           unit_type: currentUnit,
@@ -132,18 +129,22 @@ export default function PersonalEntryPage() {
         } as any);
       }
 
-      // Update participant cycle if changed
       if (cycleNumber !== selectedParticipant.cycle_number) {
         await updateParticipant(selectedParticipant.id, { cycle_number: cycleNumber });
       }
 
-      setLastSaved(new Date());
+      // Mise à jour de la position courante (source de vérité partagée avec Ramadan)
+      if (currentUnit === 'hizb') {
+        await supabase
+          .from('participants')
+          .update({ current_hizb: value })
+          .eq('id', selectedParticipantId);
+      }
+
+      setSaved(true);
       setIsNewKhatma(false);
       setIsStartingPoint(false);
-      // Small delay before fetching to ensure DB has propagated the entry
-      setTimeout(async () => {
-        await fetchEntries();
-      }, 500);
+      setTimeout(async () => { await fetchEntries(); }, 500);
     } catch (error) {
       console.error('Error saving entry:', error);
       alert('Erreur lors de la sauvegarde');
@@ -152,19 +153,15 @@ export default function PersonalEntryPage() {
     }
   };
 
+  /* ── Role guard ── */
   if (!currentUserRole || currentUserRole === 'viewer' || currentUserRole === 'owner' || currentUserRole === 'manager') {
     return (
-      <div className="text-center py-12">
-        <User className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-        <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-          Page réservée aux membres
-        </h3>
-        <p className="text-gray-600 dark:text-gray-400 mb-4">
-          Cette page permet aux membres du groupe de saisir uniquement leur propre progression.
-        </p>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
+      <div className="flex flex-col items-center justify-center min-h-[50vh] text-center px-6">
+        <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4 text-2xl">🔒</div>
+        <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Page réservée aux membres</h3>
+        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-xs">
           En tant que {currentUserRole === 'owner' ? 'propriétaire' : currentUserRole === 'manager' ? 'gestionnaire' : 'observateur'},
-          utilisez <strong>Saisie hebdo</strong> ou <strong>Saisie mensuelle</strong> à la place.
+          utilisez <strong>Saisie hebdo</strong> ou <strong>Saisie mensuelle</strong>.
         </p>
       </div>
     );
@@ -172,193 +169,156 @@ export default function PersonalEntryPage() {
 
   if (participants.length === 0) {
     return (
-      <div className="text-center py-12">
-        <User className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-        <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-          Aucun participant
-        </h3>
-        <p className="text-gray-600 dark:text-gray-400 mb-6">
-          Vous n'avez pas encore de participant lié à votre compte.
-        </p>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Demandez à un gestionnaire du groupe de vous créer un participant ou de lier un participant existant à votre compte.
+      <div className="flex flex-col items-center justify-center min-h-[50vh] text-center px-6">
+        <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4 text-2xl">👤</div>
+        <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Aucun participant lié</h3>
+        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-xs">
+          Demandez à un gestionnaire de créer un participant ou de lier votre compte.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-          Ma saisie personnelle
-        </h1>
-        <p className="text-gray-600 dark:text-gray-400">
-          Saisissez votre progression de lecture pour cette semaine
-        </p>
-      </div>
+    <div className="max-w-sm mx-auto px-4 pt-4 pb-12 flex flex-col gap-10">
 
-      {/* Participant Selection */}
+      {/* Participant selector — multi only */}
       {participants.length > 1 && (
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Sélectionner le participant
-          </label>
+        <div className="relative">
           <select
             value={selectedParticipantId}
             onChange={(e) => setSelectedParticipantId(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
+            className="w-full appearance-none bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white rounded-2xl px-4 py-3 pr-10 text-sm font-medium outline-none focus:ring-2 focus:ring-emerald-500 border-none"
           >
             <option value="">Choisir un participant</option>
-            {participants.map((participant) => (
-              <option key={participant.id} value={participant.id}>
-                {participant.name}
-              </option>
+            {participants.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>
+          <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
         </div>
       )}
 
       {selectedParticipant && (
         <>
-          {/* Participant Info */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700">
-            <div className="flex items-center gap-4 mb-4">
-              <div className="h-12 w-12 bg-emerald-100 dark:bg-emerald-900/20 rounded-full flex items-center justify-center">
-                <User className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
-              </div>
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {selectedParticipant.name}
-                </h2>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Cycle actuel: {selectedParticipant.cycle_number} • Objectif: {selectedParticipant.weekly_target_hizb || 7} hizb/semaine
-                </p>
-              </div>
-            </div>
+          {/* Identity + week */}
+          <div>
+            <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">
+              {weekLabel}
+            </p>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white leading-tight">
+              {selectedParticipant.name}
+            </h1>
+            <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">
+              {selectedParticipant.cycle_number} khatma{selectedParticipant.cycle_number > 1 ? 's' : ''}
+              {' · '}
+              objectif {selectedParticipant.weekly_target_hizb || 7} {currentUnit}/sem
+            </p>
+          </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex items-center gap-2">
-                <Target className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                <span className="text-sm text-gray-600 dark:text-gray-400">
-                  Objectif hebdo: {selectedParticipant.weekly_target_hizb || 7} hizb
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Award className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
-                <span className="text-sm text-gray-600 dark:text-gray-400">
-                  Khatmas complétées: {selectedParticipant.cycle_number}
-                </span>
-              </div>
+          {/* Progress bar */}
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-xs text-slate-400 dark:text-slate-500">
+              <span>{currentUnit} {value} / {maxValue}</span>
+              <span>{progress}%</span>
+            </div>
+            <div className="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
             </div>
           </div>
 
-          {/* Entry Form */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Position actuelle
-            </h3>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Position en {currentUnit} (1-{currentUnit === 'hizb' ? '60' : '604'})
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  max={currentUnit === 'hizb' ? 60 : 604}
-                  value={value}
-                  onChange={(e) => setValue(parseInt(e.target.value) || 0)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white text-lg font-medium text-center"
-                />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Saisissez 0 si vous n'avez pas lu cette semaine
-                </p>
-              </div>
-
-              {/* Action Buttons */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Actions spéciales
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsNewKhatma(!isNewKhatma);
-                      if (!isNewKhatma) setIsStartingPoint(false);
-                    }}
-                    className={`flex items-center justify-center gap-2 px-4 py-3 rounded-md border-2 transition-colors font-medium text-sm ${
-                      isNewKhatma
-                        ? 'bg-purple-600 text-white border-purple-600'
-                        : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-purple-400 dark:hover:border-purple-500'
-                    }`}
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    Nouvelle Khatma
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsStartingPoint(!isStartingPoint);
-                      if (!isStartingPoint) setIsNewKhatma(false);
-                    }}
-                    className={`flex items-center justify-center gap-2 px-4 py-3 rounded-md border-2 transition-colors font-medium text-sm ${
-                      isStartingPoint
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500'
-                    }`}
-                  >
-                    <MapPin className="h-4 w-4" />
-                    Point de départ
-                  </button>
-                </div>
-                {isNewKhatma && (
-                  <p className="text-xs text-purple-600 dark:text-purple-400 mt-2">
-                    Une nouvelle khatma sera enregistrée et le compteur de cycles sera incrémenté.
-                  </p>
-                )}
-                {isStartingPoint && (
-                  <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
-                    Cette entrée sera marquée comme point de départ (pas de détection automatique de khatma).
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Note (optionnel)
-                </label>
-                <textarea
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  rows={3}
-                  placeholder="Ajoutez une note sur votre progression..."
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Save Button */}
-          <div className="flex flex-col items-center gap-4">
+          {/* Counter — the main focus */}
+          <div className="flex items-center justify-between gap-4">
             <button
-              onClick={handleSave}
-              disabled={saving || !value}
-              className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+              onClick={decrement}
+              disabled={value <= 0}
+              className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 disabled:opacity-25 active:scale-95 transition-all hover:bg-slate-200 dark:hover:bg-slate-700"
             >
-              <Save className="h-5 w-5" />
-              {saving ? 'Sauvegarde...' : 'Sauvegarder ma progression'}
+              <Minus className="h-6 w-6" />
             </button>
 
-            {lastSaved && (
-              <p className="text-sm text-green-600 dark:text-green-400">
-                ✓ Sauvegardé le {lastSaved.toLocaleString('fr-FR')}
-              </p>
+            <div className="flex-1 text-center">
+              <input
+                type="number"
+                min={0}
+                max={maxValue}
+                value={value || ''}
+                onChange={(e) => { setValue(Math.min(parseInt(e.target.value) || 0, maxValue)); setSaved(false); }}
+                className="w-full text-center text-7xl font-bold text-slate-900 dark:text-white bg-transparent border-none outline-none appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+            </div>
+
+            <button
+              onClick={increment}
+              disabled={value >= maxValue}
+              className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 disabled:opacity-25 active:scale-95 transition-all hover:bg-slate-200 dark:hover:bg-slate-700"
+            >
+              <Plus className="h-6 w-6" />
+            </button>
+          </div>
+
+          {/* Special actions */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setIsNewKhatma(!isNewKhatma); if (!isNewKhatma) setIsStartingPoint(false); setSaved(false); }}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-medium transition-all ${
+                isNewKhatma
+                  ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/20'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+              }`}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Nouvelle Khatma
+            </button>
+            <button
+              onClick={() => { setIsStartingPoint(!isStartingPoint); if (!isStartingPoint) setIsNewKhatma(false); setSaved(false); }}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-medium transition-all ${
+                isStartingPoint
+                  ? 'bg-sky-600 text-white shadow-lg shadow-sky-500/20'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+              }`}
+            >
+              <MapPin className="h-3.5 w-3.5" />
+              Point de départ
+            </button>
+          </div>
+
+          {/* Note — collapsed by default */}
+          <div>
+            <button
+              onClick={() => setShowNote(!showNote)}
+              className="flex items-center gap-2 text-sm text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+            >
+              <MessageSquare className="h-4 w-4" />
+              {note && !showNote ? 'Voir la note' : showNote ? 'Masquer' : 'Ajouter une note'}
+            </button>
+            {showNote && (
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                rows={3}
+                autoFocus
+                placeholder="Une note sur ta progression…"
+                className="mt-3 w-full bg-slate-100 dark:bg-slate-800 rounded-2xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 outline-none focus:ring-2 focus:ring-emerald-500 resize-none border-none"
+              />
             )}
           </div>
+
+          {/* Save button */}
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className={`w-full py-4 rounded-2xl font-semibold text-base transition-all active:scale-[0.98] ${
+              saved
+                ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40 disabled:cursor-not-allowed'
+            }`}
+          >
+            {saving ? 'Enregistrement…' : saved ? '✓ Enregistré' : hasExistingEntry ? 'Mettre à jour' : 'Enregistrer'}
+          </button>
         </>
       )}
     </div>

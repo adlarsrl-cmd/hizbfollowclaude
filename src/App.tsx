@@ -21,6 +21,7 @@ const JoinGroupPage = React.lazy(() => import('./pages/JoinGroupPage'));
 const ForgotPasswordPage = React.lazy(() => import('./pages/ForgotPasswordPage'));
 const ResetPasswordPage = React.lazy(() => import('./pages/ResetPasswordPage'));
 const QuranReaderPage = React.lazy(() => import('./pages/QuranReaderPage'));
+const RamadanPage = React.lazy(() => import('./pages/RamadanPage'));
 
 function App() {
   const { isAuthenticated, user, enableGroups, fetchMyGroups, checkEmailVerification } = useAppStore();
@@ -187,6 +188,14 @@ function App() {
               element={
                 <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
                   <QuranReaderPage />
+                </React.Suspense>
+              }
+            />
+            <Route
+              path="ramadan"
+              element={
+                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                  <RamadanPage />
                 </React.Suspense>
               }
             />
