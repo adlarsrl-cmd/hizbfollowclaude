@@ -794,7 +794,9 @@ export default function QuranReaderPage() {
   
   // UI Settings
   const [languageMode, setLanguageMode] = useState<LanguageMode>('both');
-  const [fontSize, setFontSize] = useState<FontSize>('large');
+  const [fontSize, setFontSize] = useState<FontSize>(
+    () => (localStorage.getItem('quran-font-size') as FontSize) || 'large'
+  );
   const [fontFamily, setFontFamily] = useState<FontFamily>(
     () => (localStorage.getItem('quran-font-family') as FontFamily) || 'amiri'
   );
@@ -972,16 +974,16 @@ export default function QuranReaderPage() {
   }, [verses, surahs, viewMode]);
 
   // Exact mushaf line layout: words grouped by line_number with tajweed applied per word
+  interface MushafRenderItem { html: string; verseKey: string; charType: string; }
   interface MushafRenderLine {
     lineNum: number;
-    html: string;
+    items: MushafRenderItem[];
     newSurahBefore?: { surahNum: number; hasBismillah: boolean };
   }
 
   const mushafLines = useMemo((): MushafRenderLine[] => {
     if (viewMode !== 'page' || pageWords.length === 0 || verses.length === 0) return [];
 
-    // Build verse → tajweed word chunks (split by spaces outside <tajweed> tags)
     const verseTajweedWords = new Map<string, string[]>();
     for (const verse of verses) {
       verseTajweedWords.set(
@@ -990,7 +992,6 @@ export default function QuranReaderPage() {
       );
     }
 
-    // Track which surah starts on which line (verse_number === 1 present on page)
     const surahFirstLine = new Map<number, number>();
     for (const word of pageWords) {
       const verseNum = parseInt(word.verse_key.split(':')[1]);
@@ -1000,13 +1001,12 @@ export default function QuranReaderPage() {
       }
     }
 
-    // Build line → html items
-    const lineHtmlItems = new Map<number, string[]>();
+    const lineItems = new Map<number, MushafRenderItem[]>();
     const verseWordIdx = new Map<string, number>();
 
     for (const word of pageWords) {
       const lineNum = word.line_number;
-      if (!lineHtmlItems.has(lineNum)) lineHtmlItems.set(lineNum, []);
+      if (!lineItems.has(lineNum)) lineItems.set(lineNum, []);
 
       let itemHtml = '';
       if (word.char_type_name === 'end') {
@@ -1020,13 +1020,12 @@ export default function QuranReaderPage() {
         verseWordIdx.set(word.verse_key, idx + 1);
       }
 
-      lineHtmlItems.get(lineNum)!.push(itemHtml);
+      lineItems.get(lineNum)!.push({ html: itemHtml, verseKey: word.verse_key, charType: word.char_type_name });
     }
 
-    const sortedLineNums = [...lineHtmlItems.keys()].sort((a, b) => a - b);
+    const sortedLineNums = [...lineItems.keys()].sort((a, b) => a - b);
 
     return sortedLineNums.map(lineNum => {
-      // Find if a surah starts at this line
       let newSurahBefore: MushafRenderLine['newSurahBefore'];
       for (const [surahNum, firstLine] of surahFirstLine.entries()) {
         if (firstLine === lineNum) {
@@ -1034,13 +1033,36 @@ export default function QuranReaderPage() {
           break;
         }
       }
-      return {
-        lineNum,
-        html: lineHtmlItems.get(lineNum)!.join(' '),
-        newSurahBefore,
-      };
+      return { lineNum, items: lineItems.get(lineNum)!, newSurahBefore };
     });
   }, [viewMode, pageWords, verses]);
+
+  // Position picker state
+  const [showPositionPicker, setShowPositionPicker] = useState(false);
+  const [pickerValue, setPickerValue] = useState(1);
+
+  // Swipe gesture state
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [touchStartY, setTouchStartY] = useState<number | null>(null);
+
+  // Persist fontSize to localStorage
+  useEffect(() => {
+    localStorage.setItem('quran-font-size', fontSize);
+  }, [fontSize]);
+
+  // Keyboard navigation (arrow keys) — ← next, → prev (RTL convention)
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === 'ArrowRight') goToPrev();
+      if (e.key === 'ArrowLeft') goToNext();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [viewMode, currentPage, currentSurah, currentHizb]);
+
+  // Scroll to top on content change
+  const scrollToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
   // Navigation handlers
   const goToNext = () => {
@@ -1052,6 +1074,7 @@ export default function QuranReaderPage() {
     } else if (viewMode === 'hizb') {
       setCurrentHizb(prev => Math.min(prev + 1, TOTAL_HIZB));
     }
+    scrollToTop();
   };
 
   const goToPrev = () => {
@@ -1063,6 +1086,25 @@ export default function QuranReaderPage() {
     } else if (viewMode === 'hizb') {
       setCurrentHizb(prev => Math.max(prev - 1, 1));
     }
+    scrollToTop();
+  };
+
+  // Swipe gesture handlers
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchStartX(e.touches[0].clientX);
+    setTouchStartY(e.touches[0].clientY);
+  };
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX === null || touchStartY === null) return;
+    const dx = touchStartX - e.changedTouches[0].clientX;
+    const dy = Math.abs(touchStartY - e.changedTouches[0].clientY);
+    // Only trigger if horizontal swipe > 60px and not a vertical scroll
+    if (Math.abs(dx) > 60 && dy < 40) {
+      if (dx > 0) goToNext();
+      else goToPrev();
+    }
+    setTouchStartX(null);
+    setTouchStartY(null);
   };
 
   // Switch view mode AND restore last saved position in that mode
@@ -1214,7 +1256,11 @@ export default function QuranReaderPage() {
     <>
       <style>{tajweedStyles}</style>
       
-      <div className={`quran-container min-h-screen ${isDark ? '' : 'quran-light'}`}>
+      <div
+        className={`quran-container min-h-screen ${isDark ? '' : 'quran-light'}`}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
         {/* Header */}
         <div className={`sticky top-0 z-30 backdrop-blur-md border-b ${isDark ? 'bg-[#1a1f2e]/95 border-gray-700/50' : 'bg-white/95 border-gray-200/80'}`}>
           <div className="max-w-5xl mx-auto px-4 py-2">
@@ -1427,11 +1473,22 @@ export default function QuranReaderPage() {
                         </div>
                       )}
 
-                      {/* The line itself */}
-                      <div
-                        className={`mushaf-line tajweed-text ${fontFamily === 'noto' ? 'font-noto' : ''} ${fontSizes[fontSize]}`}
-                        dangerouslySetInnerHTML={{ __html: line.html }}
-                      />
+                      {/* The line — each word is individually clickable */}
+                      <div className={`mushaf-line tajweed-text ${fontFamily === 'noto' ? 'font-noto' : ''} ${fontSizes[fontSize]}`}>
+                        {line.items.map((item, wi) => (
+                          <React.Fragment key={wi}>
+                            <span
+                              style={{ cursor: 'pointer' }}
+                              onClick={(e) => {
+                                const verse = verses.find(v => v.verse_key === item.verseKey);
+                                if (verse) handleVerseClick(verse, e as unknown as React.MouseEvent);
+                              }}
+                              dangerouslySetInnerHTML={{ __html: item.html }}
+                            />
+                            {wi < line.items.length - 1 && ' '}
+                          </React.Fragment>
+                        ))}
+                      </div>
                     </React.Fragment>
                   );
                 })}
@@ -1500,81 +1557,51 @@ export default function QuranReaderPage() {
             )}
           </div>
 
-          {/* Quick Navigation */}
-          <div className="mt-6 flex items-center justify-center gap-4">
-            {viewMode === 'page' && (
-              <div className="flex items-center gap-2">
-                <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Page:</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={TOTAL_PAGES}
-                  value={currentPage}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    if (!isNaN(val) && val >= 1 && val <= TOTAL_PAGES) {
-                      setCurrentPage(val);
-                    }
-                  }}
-                  onBlur={(e) => {
-                    const val = parseInt(e.target.value);
-                    if (isNaN(val) || val < 1 || val > TOTAL_PAGES) {
-                      setCurrentPage(1);
-                    }
-                  }}
-                  className="input-modern w-20 text-center"
-                />
-              </div>
-            )}
-            {viewMode === 'surah' && (
-              <div className="flex items-center gap-2">
-                <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Sourate:</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={114}
-                  value={currentSurah}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    if (!isNaN(val) && val >= 1 && val <= 114) {
-                      setCurrentSurah(val);
-                    }
-                  }}
-                  onBlur={(e) => {
-                    const val = parseInt(e.target.value);
-                    if (isNaN(val) || val < 1 || val > 114) {
-                      setCurrentSurah(1);
-                    }
-                  }}
-                  className="input-modern w-20 text-center"
-                />
-              </div>
-            )}
-            {viewMode === 'hizb' && (
-              <div className="flex items-center gap-2">
-                <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Hizb:</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={TOTAL_HIZB}
-                  value={currentHizb}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    if (!isNaN(val) && val >= 1 && val <= TOTAL_HIZB) {
-                      setCurrentHizb(val);
-                    }
-                  }}
-                  onBlur={(e) => {
-                    const val = parseInt(e.target.value);
-                    if (isNaN(val) || val < 1 || val > TOTAL_HIZB) {
-                      setCurrentHizb(1);
-                    }
-                  }}
-                  className="input-modern w-20 text-center"
-                />
-              </div>
-            )}
-          </div>
+          {/* Quick Navigation — hidden for page mode (use bottom bar picker) */}
+          {viewMode !== 'page' && (
+            <div className="mt-6 flex items-center justify-center gap-4">
+              {viewMode === 'surah' && (
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Sourate:</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={114}
+                    value={currentSurah}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      if (!isNaN(val) && val >= 1 && val <= 114) setCurrentSurah(val);
+                    }}
+                    onBlur={(e) => {
+                      const val = parseInt(e.target.value);
+                      if (isNaN(val) || val < 1 || val > 114) setCurrentSurah(1);
+                    }}
+                    className="input-modern w-20 text-center"
+                  />
+                </div>
+              )}
+              {viewMode === 'hizb' && (
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Hizb:</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={TOTAL_HIZB}
+                    value={currentHizb}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      if (!isNaN(val) && val >= 1 && val <= TOTAL_HIZB) setCurrentHizb(val);
+                    }}
+                    onBlur={(e) => {
+                      const val = parseInt(e.target.value);
+                      if (isNaN(val) || val < 1 || val > TOTAL_HIZB) setCurrentHizb(1);
+                    }}
+                    className="input-modern w-20 text-center"
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Surah Pagination for long surahs */}
           {viewMode === 'surah' && totalVersePages > 1 && (
@@ -1630,13 +1657,16 @@ export default function QuranReaderPage() {
               <span className="text-[10px]">Sourates</span>
             </button>
 
-            {/* Current Position (center) */}
-            <div className="flex flex-col items-center px-2 min-w-0 max-w-[100px]">
+            {/* Current Position (center) — clickable to open picker */}
+            <button
+              onClick={() => { setPickerValue(viewMode === 'page' ? currentPage : viewMode === 'hizb' ? currentHizb : currentSurah); setShowPositionPicker(true); }}
+              className={`flex flex-col items-center px-2 min-w-0 max-w-[110px] rounded-xl py-1 transition-colors active:scale-95 ${isDark ? 'hover:bg-gray-700/50 active:bg-gray-700' : 'hover:bg-gray-100 active:bg-gray-200'}`}
+            >
               <span className={`text-sm font-bold font-arabic truncate w-full text-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
                 {getPositionLabel()}
               </span>
-              <span className="text-[10px] text-emerald-500">{readingProgress}%</span>
-            </div>
+              <span className="text-[10px] text-emerald-500">{readingProgress}% · appuyer</span>
+            </button>
 
             {/* Settings */}
             <button
@@ -1892,6 +1922,86 @@ export default function QuranReaderPage() {
             </div>
           </div>
         </div>
+        )}
+
+        {/* Position Picker — bottom sheet */}
+        {showPositionPicker && (
+          <>
+            <div
+              className="fixed inset-0 z-[70] bg-black/50"
+              onClick={() => setShowPositionPicker(false)}
+            />
+            <div className={`fixed bottom-0 left-0 right-0 z-[71] rounded-t-3xl shadow-2xl px-6 pt-4 pb-10 ${isDark ? 'bg-gray-900 border-t border-gray-800' : 'bg-white border-t border-gray-200'}`}>
+              {/* Drag handle */}
+              <div className={`w-10 h-1 rounded-full mx-auto mb-5 ${isDark ? 'bg-gray-700' : 'bg-gray-300'}`} />
+
+              <p className={`text-center text-base font-semibold mb-6 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                {viewMode === 'page' ? 'Aller à la page' : viewMode === 'hizb' ? 'Aller au hizb' : 'Aller à la sourate'}
+              </p>
+
+              {/* Number picker */}
+              <div className="flex items-center justify-center gap-5 mb-4">
+                <button
+                  onPointerDown={() => {
+                    setPickerValue(v => Math.max(1, v - 1));
+                  }}
+                  onClick={() => setPickerValue(v => Math.max(1, v - 1))}
+                  className={`w-14 h-14 rounded-2xl text-2xl font-bold transition-all active:scale-90 ${isDark ? 'bg-gray-800 text-white hover:bg-gray-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                >
+                  −
+                </button>
+
+                <input
+                  type="number"
+                  min={1}
+                  max={viewMode === 'page' ? TOTAL_PAGES : viewMode === 'hizb' ? TOTAL_HIZB : 114}
+                  value={pickerValue}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value) || 1;
+                    const max = viewMode === 'page' ? TOTAL_PAGES : viewMode === 'hizb' ? TOTAL_HIZB : 114;
+                    setPickerValue(Math.min(max, Math.max(1, v)));
+                  }}
+                  className={`text-6xl font-bold w-36 text-center bg-transparent border-none outline-none appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${isDark ? 'text-white' : 'text-gray-900'}`}
+                />
+
+                <button
+                  onClick={() => {
+                    const max = viewMode === 'page' ? TOTAL_PAGES : viewMode === 'hizb' ? TOTAL_HIZB : 114;
+                    setPickerValue(v => Math.min(max, v + 1));
+                  }}
+                  className={`w-14 h-14 rounded-2xl text-2xl font-bold transition-all active:scale-90 ${isDark ? 'bg-gray-800 text-white hover:bg-gray-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                >
+                  +
+                </button>
+              </div>
+
+              {/* Progress sub-label */}
+              <p className={`text-center text-sm mb-2 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                sur {viewMode === 'page' ? TOTAL_PAGES : viewMode === 'hizb' ? TOTAL_HIZB : 114}
+              </p>
+
+              {/* Progress bar */}
+              <div className={`h-1.5 rounded-full mb-6 overflow-hidden ${isDark ? 'bg-gray-800' : 'bg-gray-200'}`}>
+                <div
+                  className="h-full bg-emerald-500 rounded-full transition-all"
+                  style={{ width: `${Math.round((pickerValue / (viewMode === 'page' ? TOTAL_PAGES : viewMode === 'hizb' ? TOTAL_HIZB : 114)) * 100)}%` }}
+                />
+              </div>
+
+              <button
+                onClick={() => {
+                  if (viewMode === 'page') setCurrentPage(pickerValue);
+                  else if (viewMode === 'hizb') setCurrentHizb(pickerValue);
+                  else { setCurrentSurah(pickerValue); setCurrentVersePage(1); }
+                  setShowPositionPicker(false);
+                  scrollToTop();
+                }}
+                className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-base transition-all active:scale-[0.98]"
+              >
+                Confirmer
+              </button>
+            </div>
+          </>
         )}
 
         {/* Verse Context Menu — bottom sheet on mobile, floating on desktop */}
