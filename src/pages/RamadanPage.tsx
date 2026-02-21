@@ -3,6 +3,7 @@ import { Star, Minus, Plus, ChevronDown, BookOpen } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { supabase } from '../lib/supabase';
 import { Skeleton } from '../components/ui/Skeleton';
+import type { RamadanEntry } from '../types';
 
 // Point de départ du suivi Ramadan 1447
 const RAMADAN_LABEL = 'Ramadan 1447';
@@ -24,9 +25,9 @@ function relativeDate(dateStr: string): string {
  * La première entrée est le point de départ (baseline), chaque entrée suivante
  * génère un delta. Une khatma = 60 hizb cumulés.
  */
-function computeRamadanStats(entries: any[], participantId: string) {
+function computeRamadanStats(entries: RamadanEntry[], participantId: string, userId?: string) {
   const sorted = entries
-    .filter(e => e.participant_id === participantId)
+    .filter(e => userId ? e.user_id === userId : e.participant_id === participantId)
     .sort((a, b) => a.recorded_date.localeCompare(b.recorded_date));
 
   if (sorted.length === 0) return { ramadanTotal: 0, ramadanKhatmas: 0, lastHizb: null, lastDate: null };
@@ -54,7 +55,7 @@ export default function RamadanPage() {
 
   // ── Data ────────────────────────────────────────────────────────────────
   const [allParticipants, setAllParticipants]   = useState<any[]>([]);
-  const [ramadanEntries, setRamadanEntries]     = useState<any[]>([]);
+  const [ramadanEntries, setRamadanEntries]     = useState<RamadanEntry[]>([]);
   const [pageLoading, setPageLoading]           = useState(true);
 
   // ── Input form ──────────────────────────────────────────────────────────
@@ -69,20 +70,39 @@ export default function RamadanPage() {
   // ── Fetch ────────────────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
     if (!activeGroupId) return;
-    const [{ data: parts }, { data: ents }] = await Promise.all([
-      supabase
-        .from('participants')
-        .select('*')
-        .eq('group_id', activeGroupId)
-        .eq('active', true)
-        .order('created_at', { ascending: true }),
-      supabase
-        .from('ramadan_entries')
-        .select('*')
-        .eq('group_id', activeGroupId)
-        .order('recorded_date', { ascending: true }),
-    ]);
+
+    const { data: parts } = await supabase
+      .from('participants')
+      .select('*')
+      .eq('group_id', activeGroupId)
+      .eq('active', true)
+      .order('created_at', { ascending: true });
+
     setAllParticipants(parts || []);
+
+    // Fetch ramadan_entries cross-groupe via user_id des participants
+    const participantUserIds = parts?.map(p => p.user_id).filter(Boolean) as string[] || [];
+    const ghostParticipantIds = parts?.filter(p => !p.user_id).map(p => p.id) || [];
+
+    let ramadanQuery = supabase
+      .from('ramadan_entries')
+      .select('*')
+      .order('recorded_date', { ascending: true });
+
+    if (participantUserIds.length > 0 && ghostParticipantIds.length > 0) {
+      ramadanQuery = ramadanQuery.or(
+        `user_id.in.(${participantUserIds.join(',')}),participant_id.in.(${ghostParticipantIds.join(',')})`
+      );
+    } else if (participantUserIds.length > 0) {
+      ramadanQuery = ramadanQuery.in('user_id', participantUserIds);
+    } else if (ghostParticipantIds.length > 0) {
+      ramadanQuery = ramadanQuery.in('participant_id', ghostParticipantIds);
+    } else {
+      setRamadanEntries([]);
+      return;
+    }
+
+    const { data: ents } = await ramadanQuery;
     setRamadanEntries(ents || []);
   }, [activeGroupId]);
 
@@ -104,8 +124,13 @@ export default function RamadanPage() {
 
   // ── Today's entry for selected participant ───────────────────────────────
   const todayEntry = useMemo(() =>
-    ramadanEntries.find(e => e.participant_id === inputParticipantId && e.recorded_date === today),
-    [ramadanEntries, inputParticipantId, today]
+    ramadanEntries.find(e =>
+      (myParticipant?.user_id
+        ? e.user_id === myParticipant.user_id
+        : e.participant_id === inputParticipantId
+      ) && e.recorded_date === today
+    ),
+    [ramadanEntries, inputParticipantId, myParticipant, today]
   );
 
   // Pre-fill input with today's or last recorded value
@@ -115,7 +140,9 @@ export default function RamadanPage() {
       setInputHizb(todayEntry.hizb_position);
     } else {
       const last = ramadanEntries
-        .filter(e => e.participant_id === inputParticipantId)
+        .filter(e => myParticipant?.user_id
+          ? e.user_id === myParticipant.user_id
+          : e.participant_id === inputParticipantId)
         .sort((a, b) => b.recorded_date.localeCompare(a.recorded_date))[0];
       setInputHizb(last?.hizb_position ?? 0);
     }
@@ -125,7 +152,7 @@ export default function RamadanPage() {
   // ── Leaderboard stats ────────────────────────────────────────────────────
   const participantStats = useMemo(() =>
     allParticipants
-      .map(p => ({ p, ...computeRamadanStats(ramadanEntries, p.id) }))
+      .map(p => ({ p, ...computeRamadanStats(ramadanEntries, p.id, p.user_id) }))
       .sort((a, b) => {
         if (b.ramadanKhatmas !== a.ramadanKhatmas) return b.ramadanKhatmas - a.ramadanKhatmas;
         return b.ramadanTotal - a.ramadanTotal;

@@ -914,28 +914,30 @@ export const useAppStore = create<AppState>()(
             const role = get().currentUserRole;
             const userId = ownerId();
 
-            // If user is a member/viewer, only fetch entries for their own participants
-            let query = supabase
-              .from('entries')
-              .select('*')
-              .eq('group_id', activeGroupId());
+            let query = supabase.from('entries').select('*');
 
             if (role === 'member' || role === 'viewer') {
-              // Get only entries for participants that belong to this user
-              const { data: myParticipants } = await supabase
-                .from('participants')
-                .select('id')
-              .eq('group_id', activeGroupId())
-                .eq('user_id', userId);
+              // Les membres voient toutes leurs entrées cross-groupes via user_id
+              query = query.eq('user_id', userId);
+            } else {
+              // Owners/managers : entrées des membres réels (via user_id) + participants fantômes (via participant_id)
+              const [{ data: members }, { data: ghosts }] = await Promise.all([
+                supabase.from('group_members').select('user_id').eq('group_id', activeGroupId()),
+                supabase.from('participants').select('id').eq('group_id', activeGroupId()).is('user_id', null),
+              ]);
 
-              const participantIds = myParticipants?.map(p => p.id) || [];
-              
-              if (participantIds.length > 0) {
-                query = query.in('participant_id', participantIds);
-              } else {
-                // No participants, return empty
+              const memberIds = members?.map(m => m.user_id).filter(Boolean) || [];
+              const ghostIds = ghosts?.map(p => p.id) || [];
+
+              if (memberIds.length === 0 && ghostIds.length === 0) {
                 set({ entries: [] });
                 return;
+              } else if (memberIds.length > 0 && ghostIds.length > 0) {
+                query = query.or(`user_id.in.(${memberIds.join(',')}),participant_id.in.(${ghostIds.join(',')})`);
+              } else if (memberIds.length > 0) {
+                query = query.in('user_id', memberIds);
+              } else {
+                query = query.in('participant_id', ghostIds);
               }
             }
 

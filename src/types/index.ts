@@ -18,6 +18,7 @@ export interface Entry {
   owner_id: string;
   group_id: string;
   participant_id: string;
+  user_id?: string;
   unit_type: 'hizb' | 'page';
   value_int: number;
   cycle_number: number;
@@ -28,6 +29,17 @@ export interface Entry {
   updated_at: string;
   is_restart?: boolean;
   previous_position?: number;
+}
+
+export interface RamadanEntry {
+  id: string;
+  group_id: string;
+  participant_id: string;
+  user_id?: string;
+  hizb_position: number;
+  recorded_date: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface WeeklySnapshot {
