@@ -1050,11 +1050,16 @@ export const useAppStore = create<AppState>()(
             return;
           }
 
+          // user_id = celui du participant (pas de l'admin qui saisit)
+          const participant = get().participants.find(p => p.id === entry.participant_id);
+          const entryUserId = participant?.user_id ?? null;
+
           const { data, error } = await supabase
             .from('entries')
             .insert({
               ...entry,
               owner_id: ownerId(),
+              user_id: entryUserId,
               group_id: activeGroupId()
             })
             .select()

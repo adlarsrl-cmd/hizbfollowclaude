@@ -130,27 +130,21 @@ export default function MonthlyEntriesPage() {
 
   // index (participant + semaine) -> dernière entrée de cette semaine
   const entriesIndex = useMemo(() => {
+    // Remapper les entrées cross-groupes : user_id -> participant_id du groupe actif
+    const userToParticipant = new Map<string, string>();
+    for (const p of participants) {
+      if (p.user_id) userToParticipant.set(p.user_id, p.id);
+    }
+
     const index = new Map<string, Entry>();
     for (const entry of entries) {
-      // Calculate weekKey from recorded_at
-      // tuesdayNoonISO creates dates at 12:00 UTC (noon to avoid timezone issues)
-      // getWeekKeyTuesday works in local timezone, but since recorded_at is at noon UTC,
-      // it should always be the same day in local timezone (noon UTC = afternoon in most timezones)
       const entryDate = new Date(entry.recorded_at);
       const wk = getWeekKeyTuesday(entryDate);
-      const key = `${entry.participant_id}-${wk}`;
-      
-      // Debug: log if we see entries being indexed
-      if (process.env.NODE_ENV === 'development' && entries.length > 0 && entries.length < 10) {
-        console.log('Entry indexed:', {
-          entryId: entry.id,
-          participantId: entry.participant_id,
-          recorded_at: entry.recorded_at,
-          weekKey: wk,
-          key
-        });
-      }
-      
+      // Si l'entrée a un user_id qui correspond à un participant du groupe actif, utiliser son id
+      const effectiveParticipantId =
+        (entry.user_id && userToParticipant.get(entry.user_id)) || entry.participant_id;
+      const key = `${effectiveParticipantId}-${wk}`;
+
       // Keep the most recent entry for this participant+week combination
       if (
         !index.has(key) ||
@@ -161,7 +155,7 @@ export default function MonthlyEntriesPage() {
       }
     }
     return index;
-  }, [entries]);
+  }, [entries, participants]);
 
   // helpers pour lire valeurs/entrées
   const getCellValue = useCallback(
@@ -184,34 +178,33 @@ export default function MonthlyEntriesPage() {
   // valeur absolue précédente (avant cette semaine) en hizb
   const getPreviousAbsoluteValue = useCallback(
     (participantId: string, weekKey: string): number | null => {
+      const participant = participants.find(p => p.id === participantId);
       const tue = parseWeekKeyTuesday(weekKey);
       tue.setHours(0, 0, 0, 0);
       const before = entries
-        .filter(
-          (e) =>
-            e.participant_id === participantId &&
-            new Date(e.recorded_at).getTime() < tue.getTime()
-        )
-        .sort(
-          (a, b) =>
-            new Date(b.recorded_at).getTime() -
-            new Date(a.recorded_at).getTime()
-        )[0];
+        .filter(e => {
+          const matches = participant?.user_id && e.user_id
+            ? e.user_id === participant.user_id
+            : e.participant_id === participantId;
+          return matches && new Date(e.recorded_at).getTime() < tue.getTime();
+        })
+        .sort((a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime())[0];
       return before ? before.value_int : null;
     },
-    [entries]
+    [entries, participants]
   );
 
   // delta hebdo (pour tooltip)
   const getCellDelta = useCallback(
     (participantId: string, weekKey: string): number => {
-      const weeklyDeltas = calculateWeeklyDeltas(entries, participantId);
+      const participant = participants.find(p => p.id === participantId);
+      const weeklyDeltas = calculateWeeklyDeltas(entries, participantId, participant?.user_id);
       const weekNumber =
         weekKey.split('-W')[1]?.replace('-TUE', '') || '';
       const weekData = weeklyDeltas.find((w) => w.week === weekNumber);
       return weekData?.delta || 0;
     },
-    [entries]
+    [entries, participants]
   );
 
   // sauvegarde cellule
@@ -469,7 +462,10 @@ export default function MonthlyEntriesPage() {
       let prevEntry = getCellEntry(participant.id, prevWeekKey);
       if (!prevEntry) {
         prevEntry = entries.find(e => {
-          if (e.participant_id !== participant.id) return false;
+          const matches = participant.user_id && e.user_id
+            ? e.user_id === participant.user_id
+            : e.participant_id === participant.id;
+          if (!matches) return false;
           const entryWeekKey = getWeekKeyTuesday(new Date(e.recorded_at));
           return entryWeekKey === prevWeekKey;
         });
@@ -492,7 +488,10 @@ export default function MonthlyEntriesPage() {
       let nextEntry = getCellEntry(participant.id, nextWeekKey);
       if (!nextEntry) {
         nextEntry = entries.find(e => {
-          if (e.participant_id !== participant.id) return false;
+          const matches = participant.user_id && e.user_id
+            ? e.user_id === participant.user_id
+            : e.participant_id === participant.id;
+          if (!matches) return false;
           const entryWeekKey = getWeekKeyTuesday(new Date(e.recorded_at));
           return entryWeekKey === nextWeekKey;
         });
@@ -651,7 +650,7 @@ export default function MonthlyEntriesPage() {
             // Calculer le cycle number
             let cycleNumber = participant.cycle_number;
             if (isRestart) {
-              const lastEntry = getLastRealEntry(entries, participant.id);
+              const lastEntry = getLastRealEntry(entries, participant.id, participant.user_id);
               cycleNumber = lastEntry ? lastEntry.cycle_number + 1 : 1;
             }
             
@@ -703,12 +702,8 @@ export default function MonthlyEntriesPage() {
   // stats par participant
   const getParticipantStats = useCallback(
     (participant: Participant) => {
-      const monthlyAvg = calculateMonthlyAverages(
-        entries,
-        participant.id,
-        selectedMonth
-      );
-      const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id);
+      const monthlyAvg = calculateMonthlyAverages(entries, participant.id, selectedMonth, participant.user_id);
+      const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id, participant.user_id);
 
       const monthTotal = monthWeeks.reduce((sum, w) => {
         const num =

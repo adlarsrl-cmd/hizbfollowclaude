@@ -51,7 +51,7 @@ export default function ParticipantsPage() {
   const participantKhatmas = useMemo(() => {
     const khatmasMap = new Map<string, number>();
     participants.forEach(p => {
-      const weeklyDeltas = calculateWeeklyDeltas(entries, p.id);
+      const weeklyDeltas = calculateWeeklyDeltas(entries, p.id, p.user_id);
       const totalHizb = weeklyDeltas.reduce((sum, w) => sum + w.delta, 0);
       const khatmas = Math.floor(totalHizb / 60);
       khatmasMap.set(p.id, khatmas);

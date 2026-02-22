@@ -60,7 +60,7 @@ export default function Dashboard() {
     // index des deltas hebdo par participant sur la semaine courante
     const weekNum = currentWeekKey.split('-W')[1]?.replace('-TUE', '') || '';
     const perParticipantDelta = active.map(p => {
-      const deltas = calculateWeeklyDeltas(entries, p.id); // [{week:'43', delta: X}, ...]
+      const deltas = calculateWeeklyDeltas(entries, p.id, p.user_id); // [{week:'43', delta: X}, ...]
       const delta = deltas.find(d => d.week === weekNum)?.delta ?? 0;
       return { participant: p, delta };
     });
@@ -202,7 +202,7 @@ export default function Dashboard() {
         const weekNum = currentWeekKey.split('-W')[1]?.replace('-TUE', '') || '';
 
         const participantDeltas = allParticipants.map(p => {
-          const deltas = calculateWeeklyDeltas(allEntries, p.id);
+          const deltas = calculateWeeklyDeltas(allEntries, p.id, p.user_id);
           const delta = deltas.find(d => d.week === weekNum)?.delta ?? 0;
           return { participant: p, delta };
         });
@@ -242,7 +242,7 @@ export default function Dashboard() {
     // Fallback to local calculation
     const sorted = participants
       .map(p => {
-        const deltas = calculateWeeklyDeltas(entries, p.id);
+        const deltas = calculateWeeklyDeltas(entries, p.id, p.user_id);
         const currentWeekKey = getWeekKeyTuesday(new Date());
         const weekNum = currentWeekKey.split('-W')[1]?.replace('-TUE', '') || '';
         const delta = deltas.find(d => d.week === weekNum)?.delta ?? 0;

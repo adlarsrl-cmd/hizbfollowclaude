@@ -3,7 +3,7 @@ import { Minus, Plus, RotateCcw, MapPin, MessageSquare, ChevronDown } from 'luci
 import { useAppStore } from '../stores/useAppStore';
 import { supabase } from '../lib/supabase';
 import {
-  getWeekBoundsTuesday,
+  getDayBounds,
   detectNewKhatma,
   getLastRealEntry
 } from '../lib/utils';
@@ -45,7 +45,7 @@ export default function PersonalEntryPage() {
   useEffect(() => {
     if (!selectedParticipantId) return;
     const now = new Date();
-    const { start: weekStart, end: weekEnd } = getWeekBoundsTuesday(now);
+    const { start: weekStart, end: weekEnd } = getDayBounds(now);
     const existingEntry = entries
       .filter(e => e.participant_id === selectedParticipantId)
       .find(e => {
@@ -57,7 +57,8 @@ export default function PersonalEntryPage() {
       setNote(existingEntry.note || '');
       setHasExistingEntry(true);
     } else {
-      const lastEntry = getLastRealEntry(entries, selectedParticipantId);
+      const pObj = participants.find(p => p.id === selectedParticipantId);
+      const lastEntry = getLastRealEntry(entries, selectedParticipantId, pObj?.user_id);
       setValue(lastEntry ? lastEntry.value_int : 1);
       setNote('');
       setHasExistingEntry(false);
@@ -72,10 +73,7 @@ export default function PersonalEntryPage() {
   const maxValue = currentUnit === 'hizb' ? 60 : 604;
   const progress = value > 0 ? Math.round((value / maxValue) * 100) : 0;
 
-  const weekLabel = (() => {
-    const { start, end } = getWeekBoundsTuesday(new Date());
-    return `${start.getDate()} – ${end.getDate()} ${end.toLocaleString('fr-FR', { month: 'long' })}`;
-  })();
+  const weekLabel = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 
   const increment = () => { setValue(v => Math.min(v + 1, maxValue)); setSaved(false); };
   const decrement = () => { setValue(v => Math.max(v - 1, 0)); setSaved(false); };
@@ -85,14 +83,14 @@ export default function PersonalEntryPage() {
     setSaving(true);
     try {
       const now = new Date();
-      const { start: weekStart, end: weekEnd } = getWeekBoundsTuesday(now);
+      const { start: weekStart, end: weekEnd } = getDayBounds(now);
       const existingEntry = entries
         .filter(e => e.participant_id === selectedParticipantId)
         .find(e => {
           const d = new Date(e.recorded_at);
           return d >= weekStart && d <= weekEnd;
         });
-      const lastEntry = getLastRealEntry(entries, selectedParticipantId);
+      const lastEntry = getLastRealEntry(entries, selectedParticipantId, selectedParticipant?.user_id);
       let cycleNumber = selectedParticipant.cycle_number;
       let finalNote = note;
 

@@ -176,9 +176,9 @@ export default function AnalyticsPage() {
 
     return filteredParticipants
       .map(participant => {
-        const average = calculateMonthlyAverages(entries, participant.id, selectedMonth);
-        const comparisonAverage = comparisonMode && comparisonMonth 
-          ? calculateMonthlyAverages(entries, participant.id, comparisonMonth)
+        const average = calculateMonthlyAverages(entries, participant.id, selectedMonth, participant.user_id);
+        const comparisonAverage = comparisonMode && comparisonMonth
+          ? calculateMonthlyAverages(entries, participant.id, comparisonMonth, participant.user_id)
           : null;
 
         return {
@@ -198,7 +198,7 @@ export default function AnalyticsPage() {
     const buildForWeeks = (weeks: { weekKey: string; date: string; fullDate: Date; monthLabel?: string }[]) => {
       const chartData = filteredParticipants.map(participant => {
         const row: any = { name: participant.name, participant_id: participant.id };
-        const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id);
+        const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id, participant.user_id);
         const deltaMap = new Map(weeklyDeltas.map(w => [w.week, w.delta]));
 
         weeks.forEach(week => {
@@ -301,7 +301,7 @@ export default function AnalyticsPage() {
         participant_id: participant.id,
         target: participant.weekly_target_hizb || 7
       };
-      const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id);
+      const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id, participant.user_id);
       const deltaMap = new Map(weeklyDeltas.map(w => [w.week, w.delta]));
 
       weeks.forEach(week => {
@@ -336,7 +336,7 @@ export default function AnalyticsPage() {
       };
 
       months.forEach(monthKey => {
-        const average = calculateMonthlyAverages(entries, participant.id, monthKey);
+        const average = calculateMonthlyAverages(entries, participant.id, monthKey, participant.user_id);
         row[monthKey] = Math.round(average * 100) / 100;
       });
 
@@ -374,7 +374,7 @@ export default function AnalyticsPage() {
   const memberStats = useMemo(() => {
     if (!memberParticipant) return null;
     const target = memberParticipant.weekly_target_hizb || 7;
-    const weeklyDeltas = calculateWeeklyDeltas(entries, memberParticipant.id);
+    const weeklyDeltas = calculateWeeklyDeltas(entries, memberParticipant.id, memberParticipant.user_id);
     const totalHizb = weeklyDeltas.reduce((s, w) => s + w.delta, 0);
     const khatmas = Math.floor(totalHizb / 60);
     const progressInCycle = totalHizb % 60;
@@ -391,7 +391,7 @@ export default function AnalyticsPage() {
       else break;
     }
 
-    const hizbRetard = calculateHizbRetard(entries, memberParticipant.id, target);
+    const hizbRetard = calculateHizbRetard(entries, memberParticipant.id, target, memberParticipant.user_id);
 
     let prediction: string | null = null;
     if (weeklyAverage > 0) {
@@ -407,7 +407,7 @@ export default function AnalyticsPage() {
 
   const memberChartData = useMemo(() => {
     if (!memberParticipant) return [];
-    const weeklyDeltas = calculateWeeklyDeltas(entries, memberParticipant.id);
+    const weeklyDeltas = calculateWeeklyDeltas(entries, memberParticipant.id, memberParticipant.user_id);
     const deltaMap = new Map(weeklyDeltas.map(w => [w.week, w.delta]));
     const now = new Date();
     const weeks = [];
@@ -1254,7 +1254,7 @@ export default function AnalyticsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
           {filteredParticipants.map((participant) => {
             // cumul réel = somme des deltas (toutes semaines)
-            const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id);
+            const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id, participant.user_id);
             const totalHizb = weeklyDeltas.reduce((sum, w) => sum + w.delta, 0);
             const khatmas = Math.floor(totalHizb / 60);
             const progressInCycle = totalHizb % 60;
@@ -1298,7 +1298,7 @@ export default function AnalyticsPage() {
             })();
 
             // calcul hizb en retard
-            const hizbRetard = calculateHizbRetard(entries, participant.id, target);
+            const hizbRetard = calculateHizbRetard(entries, participant.id, target, participant.user_id);
 
             // prédiction (reste dans le cycle courant)
             let prediction: string | null = null;

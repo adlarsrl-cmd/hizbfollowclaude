@@ -26,9 +26,18 @@ function relativeDate(dateStr: string): string {
  * génère un delta. Une khatma = 60 hizb cumulés.
  */
 function computeRamadanStats(entries: RamadanEntry[], participantId: string, userId?: string) {
-  const sorted = entries
-    .filter(e => userId ? e.user_id === userId : e.participant_id === participantId)
-    .sort((a, b) => a.recorded_date.localeCompare(b.recorded_date));
+  const relevant = entries
+    .filter(e => userId && e.user_id ? e.user_id === userId : e.participant_id === participantId);
+
+  // Dédupliquer par date : si le user a plusieurs entrées le même jour (depuis des groupes
+  // différents), on garde celle avec le updated_at le plus récent pour éviter les faux
+  // wrap-arounds qui compteraient des khatmas fictives.
+  const byDate = new Map<string, RamadanEntry>();
+  for (const e of relevant) {
+    const existing = byDate.get(e.recorded_date);
+    if (!existing || e.updated_at > existing.updated_at) byDate.set(e.recorded_date, e);
+  }
+  const sorted = [...byDate.values()].sort((a, b) => a.recorded_date.localeCompare(b.recorded_date));
 
   if (sorted.length === 0) return { ramadanTotal: 0, ramadanKhatmas: 0, lastHizb: null, lastDate: null };
   if (sorted.length === 1) return { ramadanTotal: 0, ramadanKhatmas: 0, lastHizb: sorted[0].hizb_position, lastDate: sorted[0].recorded_date };
@@ -123,15 +132,16 @@ export default function RamadanPage() {
   }, [myParticipant]);
 
   // ── Today's entry for selected participant ───────────────────────────────
-  const todayEntry = useMemo(() =>
-    ramadanEntries.find(e =>
+  const todayEntry = useMemo(() => {
+    const candidates = ramadanEntries.filter(e =>
       (myParticipant?.user_id
         ? e.user_id === myParticipant.user_id
         : e.participant_id === inputParticipantId
       ) && e.recorded_date === today
-    ),
-    [ramadanEntries, inputParticipantId, myParticipant, today]
-  );
+    );
+    // Si plusieurs entrées aujourd'hui (multi-groupes), prendre la plus récente
+    return candidates.sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0] ?? undefined;
+  }, [ramadanEntries, inputParticipantId, myParticipant, today]);
 
   // Pre-fill input with today's or last recorded value
   useEffect(() => {
@@ -139,11 +149,17 @@ export default function RamadanPage() {
     if (todayEntry) {
       setInputHizb(todayEntry.hizb_position);
     } else {
-      const last = ramadanEntries
+      // Dédupliquer par date avant de prendre la dernière
+      const userEntries = ramadanEntries
         .filter(e => myParticipant?.user_id
           ? e.user_id === myParticipant.user_id
-          : e.participant_id === inputParticipantId)
-        .sort((a, b) => b.recorded_date.localeCompare(a.recorded_date))[0];
+          : e.participant_id === inputParticipantId);
+      const byDate = new Map<string, RamadanEntry>();
+      for (const e of userEntries) {
+        const existing = byDate.get(e.recorded_date);
+        if (!existing || e.updated_at > existing.updated_at) byDate.set(e.recorded_date, e);
+      }
+      const last = [...byDate.values()].sort((a, b) => b.recorded_date.localeCompare(a.recorded_date))[0];
       setInputHizb(last?.hizb_position ?? 0);
     }
     setSaved(false);
@@ -376,7 +392,7 @@ export default function RamadanPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {participantStats.map(({ p, ramadanTotal, ramadanKhatmas, lastDate }, index) => (
+            {participantStats.map(({ p, ramadanTotal, ramadanKhatmas, lastHizb, lastDate }, index) => (
               <div
                 key={p.id}
                 className={`relative bg-white dark:bg-slate-800/50 rounded-2xl p-5 border transition-all duration-300 hover:shadow-lg ${
@@ -422,12 +438,12 @@ export default function RamadanPage() {
                   </div>
                 </div>
 
-                {/* Current hizb — focal point (current_hizb = source de vérité) */}
+                {/* Current hizb — focal point (from cross-group deduplicated stats) */}
                 <div className="text-center py-3 mb-4">
-                  {p.current_hizb != null ? (
+                  {lastHizb != null ? (
                     <>
                       <p className="text-6xl font-black text-slate-900 dark:text-white leading-none tracking-tight">
-                        {p.current_hizb}
+                        {lastHizb}
                       </p>
                       <p className="text-xs text-slate-400 dark:text-slate-500 mt-2 font-medium uppercase tracking-widest">
                         hizb actuel
