@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Book,
@@ -33,7 +33,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { useAppStore } from '../stores/useAppStore';
 import { useToast } from '../stores/useToast';
-import { getWeekKeyTuesday, tuesdayNoonISO } from '../lib/utils';
+import { getDayBounds } from '../lib/utils';
 
 type ViewMode = 'page' | 'surah' | 'hizb';
 type LanguageMode = 'arabic' | 'french' | 'both';
@@ -210,12 +210,9 @@ const tajweedStyles = `
     content: '';
     position: absolute;
     inset: 0;
-    background-image: url('/frameverse.png');
-    background-size: contain;
-    background-repeat: no-repeat;
-    background-position: center;
-    /* Dark mode: invert to white then tint gold */
-    filter: invert(1) sepia(0.4) saturate(1.5) brightness(0.95);
+    border-radius: 50%;
+    border: 1px solid rgba(220, 180, 80, 0.7);
+    background: radial-gradient(circle, rgba(180,130,30,0.18) 0%, rgba(180,130,30,0.04) 100%);
     z-index: -1;
   }
 
@@ -224,8 +221,8 @@ const tajweedStyles = `
   }
 
   .quran-light .verse-number::before {
-    /* Light mode: keep the frame dark */
-    filter: none;
+    border-color: rgba(120, 80, 10, 0.5);
+    background: radial-gradient(circle, rgba(200,160,40,0.15) 0%, rgba(200,160,40,0.03) 100%);
   }
   
   @media (max-width: 640px) {
@@ -256,18 +253,17 @@ const tajweedStyles = `
     content: '';
     position: absolute;
     inset: 0;
-    background-image: url('/frameverse.png');
-    background-size: contain;
-    background-repeat: no-repeat;
-    background-position: center;
-    filter: invert(1) sepia(0.4) saturate(1.5) brightness(0.95);
+    border-radius: 50%;
+    border: 1px solid rgba(220, 180, 80, 0.7);
+    background: radial-gradient(circle, rgba(180,130,30,0.18) 0%, rgba(180,130,30,0.04) 100%);
     z-index: -1;
   }
   .quran-light .verse-number-inline {
     color: #3a2800;
   }
   .quran-light .verse-number-inline::before {
-    filter: none;
+    border-color: rgba(120, 80, 10, 0.5);
+    background: radial-gradient(circle, rgba(200,160,40,0.15) 0%, rgba(200,160,40,0.03) 100%);
   }
 
   /* ===== MUSHAF PAGE — surah header box ===== */
@@ -297,6 +293,54 @@ const tajweedStyles = `
     text-align-last: justify;
     width: 100%;
     padding: 0.15em 0;
+  }
+
+  /* ===== MUSHAF NO-SCROLL (page mode) ===== */
+  .mushaf-no-scroll {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    direction: rtl;
+    width: 100%;
+  }
+  .mushaf-no-scroll .mushaf-line-group {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .mushaf-no-scroll .mushaf-line-group .surah-header-compact {
+    flex-shrink: 0;
+  }
+  .mushaf-no-scroll .mushaf-line {
+    flex: 1;
+    min-height: 0;
+    overflow: visible;
+    padding: 0;
+    /* Flex layout ensures each line fills the full width and words are
+       evenly spaced — fixes single-word lines that would stretch with justify */
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    text-align: right;
+  }
+  /* Tighter line-height in no-scroll mode (2.2 vs 2.8) — fits more on screen */
+  .mushaf-no-scroll .tajweed-text {
+    line-height: 2.2 !important;
+    word-spacing: 0.15em;
+  }
+  @media (max-width: 640px) {
+    .mushaf-no-scroll .tajweed-text {
+      word-spacing: 0.08em;
+    }
+  }
+  /* Verse ornament scales with mushafAutoFontSize in no-scroll mode */
+  .mushaf-no-scroll .verse-number-inline {
+    font-size: 0.65em;
+    width: 2.4em;
+    height: 2.4em;
+    margin: 0 0.15em;
   }
 
   /* ===== VERSE INTERACTIONS ===== */
@@ -368,6 +412,18 @@ const tajweedStyles = `
     text-shadow: none;
   }
 `;
+
+/**
+ * Word-level API returns <rule class=...> tags; verse-level returns <tajweed class=...>.
+ * Normalize word-level tajweed before processing.
+ */
+function processWordTajweed(html: string): string {
+  if (!html) return html;
+  const normalized = html
+    .replace(/<rule(\s[^>]*)?>/g, (_, attrs) => `<tajweed${attrs || ''}>`)
+    .replace(/<\/rule>/g, '</tajweed>');
+  return processTajweedHtml(normalized);
+}
 
 /**
  * Process Tajweed HTML with granular color application
@@ -823,6 +879,12 @@ export default function QuranReaderPage() {
   const savedVerseRef = useRef<HTMLDivElement>(null);
   const viewModeDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Mushaf no-scroll: auto font size
+  const headerRef = useRef<HTMLDivElement>(null);
+  const bottomNavRef = useRef<HTMLDivElement>(null);
+  const mushafNoScrollRef = useRef<HTMLDivElement>(null);
+  const [mushafAutoFontSize, setMushafAutoFontSize] = useState(18);
+
   // Font sizes mapping — smaller baseline on mobile
   const fontSizes: Record<FontSize, string> = {
     small: 'text-base sm:text-xl',
@@ -980,39 +1042,51 @@ export default function QuranReaderPage() {
   }
 
   const mushafLines = useMemo((): MushafRenderLine[] => {
-    if (viewMode !== 'page' || pageWords.length === 0 || verses.length === 0) return [];
+    if (viewMode !== 'page' || pageWords.length === 0) return [];
 
+    // Verse-level tajweed split by word — used as fallback when word-level tajweed is absent.
+    // word.position (1-indexed within verse) maps directly to chunks[position-1], which is
+    // cross-page safe because positions are absolute within the verse.
     const verseTajweedWords = new Map<string, string[]>();
     for (const verse of verses) {
       const processed = processTajweedHtml(verse.text_uthmani_tajweed || verse.text_uthmani);
       verseTajweedWords.set(verse.verse_key, splitTajweedByWords(processed));
     }
 
+    // Detect surah starts: find the first line_number on this page for verse 1 of any surah
     const surahFirstLine = new Map<number, number>();
     for (const word of pageWords) {
-      const verseNum = parseInt(word.verse_key.split(':')[1]);
-      const surahNum = parseInt(word.verse_key.split(':')[0]);
-      if (verseNum === 1 && !surahFirstLine.has(surahNum)) {
-        surahFirstLine.set(surahNum, word.line_number);
+      const [surahStr, verseStr] = word.verse_key.split(':');
+      if (verseStr === '1' && !surahFirstLine.has(+surahStr)) {
+        surahFirstLine.set(+surahStr, word.line_number);
       }
     }
 
     const lineItems = new Map<number, MushafRenderItem[]>();
-    const verseWordIdx = new Map<string, number>();
 
     for (const word of pageWords) {
       const lineNum = word.line_number;
       if (!lineItems.has(lineNum)) lineItems.set(lineNum, []);
 
-      let itemHtml = '';
+      let itemHtml: string;
+
       if (word.char_type_name === 'end') {
+        // Verse-end ornament with Western numerals (1, 2, 3...)
         const verseNum = parseInt(word.verse_key.split(':')[1]);
-        itemHtml = `<span class="verse-number-inline">${toArabicNumerals(verseNum)}</span>`;
+        itemHtml = `<span class="verse-number-inline">${verseNum}</span>`;
+      } else if (word.text_uthmani_tajweed) {
+        // PRIMARY: word-level tajweed from API. The API returns <rule class=...> tags
+        // at the word level, while the verse level uses <tajweed class=...>.
+        // processWordTajweed normalizes <rule> → <tajweed> then applies full processing.
+        itemHtml = processWordTajweed(word.text_uthmani_tajweed);
       } else {
+        // FALLBACK: verse-level tajweed split by position.
+        // word.position is 1-indexed within the verse (absolute, works cross-page).
         const chunks = verseTajweedWords.get(word.verse_key) || [];
-        const idx = verseWordIdx.get(word.verse_key) || 0;
-        itemHtml = idx < chunks.length ? chunks[idx] : processTajweedHtml(word.text_uthmani);
-        verseWordIdx.set(word.verse_key, idx + 1);
+        const idx = word.position - 1;
+        itemHtml = (idx >= 0 && idx < chunks.length)
+          ? chunks[idx]
+          : processTajweedHtml(word.text_uthmani);
       }
 
       lineItems.get(lineNum)!.push({ html: itemHtml, verseKey: word.verse_key, charType: word.char_type_name });
@@ -1045,6 +1119,49 @@ export default function QuranReaderPage() {
   useEffect(() => {
     localStorage.setItem('quran-font-size', fontSize);
   }, [fontSize]);
+
+  // Mushaf no-scroll: compute auto font size from available height
+  useLayoutEffect(() => {
+    if (viewMode !== 'page') return;
+    const compute = () => {
+      const el = mushafNoScrollRef.current;
+      if (!el) return;
+      // Use getBoundingClientRect().top to get the EXACT position of the container
+      // in the viewport — this accounts for the header height, any margins/padding,
+      // progress bar, etc. without needing to measure each element separately.
+      const containerTop = el.getBoundingClientRect().top;
+      const navH = bottomNavRef.current?.offsetHeight ?? 64;
+      const availH = window.innerHeight - containerTop - navH;
+      if (availH <= 0) return;
+      el.style.height = `${availH}px`;
+      // Each content line = flex weight 1.
+      // A surah header group has the header element + the text line:
+      //   - No bismillah (surah 1 & 9): header ≈ 1 line-height → total flex 2
+      //   - With bismillah: header title + bismillah ≈ 2 line-heights → total flex 3
+      // The font is scaled so the entire page fills the screen, capped at 30 px
+      // to prevent over-zoom on sparse pages (e.g. page 1 = Fatiha, 7 lines).
+      const totalFlex = mushafLines.reduce((s, l) => {
+        if (!l.newSurahBefore) return s + 1;
+        return s + (l.newSurahBefore.hasBismillah ? 3 : 2);
+      }, 0) || 1;
+      // availH includes the page-info strip (~30px, flex-shrink:0).
+      // Subtract it so the last line doesn't overflow the container.
+      const pageInfoH = pageInfo ? 30 : 0;
+      const computed = Math.floor((availH - pageInfoH) / totalFlex / 2.2);
+      setMushafAutoFontSize(Math.min(computed, 30));
+    };
+    compute();
+    // Observe the header (not the container itself, to avoid resize loops).
+    // Window resize covers viewport size changes (rotation, browser chrome show/hide).
+    const ro = new ResizeObserver(compute);
+    if (headerRef.current) ro.observe(headerRef.current);
+    if (bottomNavRef.current) ro.observe(bottomNavRef.current);
+    window.addEventListener('resize', compute);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', compute);
+    };
+  }, [viewMode, mushafLines.length, pageInfo]);
 
   // Keyboard navigation (arrow keys) — ← next, → prev (RTL convention)
   useEffect(() => {
@@ -1161,37 +1278,30 @@ export default function QuranReaderPage() {
     
     try {
       const hizbNumber = selectedVerse.hizb_number;
-      
-      const weekKey = getWeekKeyTuesday(new Date());
-      const recordedAt = tuesdayNoonISO(weekKey);
-      
+      const now = new Date();
+      const { start: dayStart, end: dayEnd } = getDayBounds(now);
+      // recorded_at = today at noon
+      const recordedAt = new Date(now); recordedAt.setHours(12, 0, 0, 0);
+
       const myParticipant = participants.find(p => p.user_id === user.id);
-      
+
       if (!myParticipant) {
         showWarning('Tu n\'es pas encore lié à un participant. Demande à un admin de te lier.');
         setSavingProgress(false);
         return;
       }
-      
-      const weekStart = new Date();
-      weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
-      weekStart.setHours(0, 0, 0, 0);
 
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekEnd.getDate() + 6);
-      weekEnd.setHours(23, 59, 59, 999);
-
-      // Chercher l'entrée existante par user_id (cross-groupe)
+      // Chercher l'entrée existante du jour par user_id (cross-groupe)
       const existingEntry = entries.find(e =>
         e.user_id === user.id &&
-        new Date(e.recorded_at) >= weekStart &&
-        new Date(e.recorded_at) <= weekEnd
+        new Date(e.recorded_at) >= dayStart &&
+        new Date(e.recorded_at) <= dayEnd
       );
 
       if (existingEntry) {
         await updateEntry(existingEntry.id, {
           value_int: hizbNumber,
-          recorded_at: recordedAt,
+          recorded_at: recordedAt.toISOString(),
           note: `Lu jusqu'au verset ${selectedVerse.verse_key}`
         });
       } else {
@@ -1201,7 +1311,7 @@ export default function QuranReaderPage() {
           value_int: hizbNumber,
           cycle_number: myParticipant.cycle_number || 0,
           source: 'app_reader',
-          recorded_at: recordedAt,
+          recorded_at: recordedAt.toISOString(),
           note: `Lu jusqu'au verset ${selectedVerse.verse_key}`
         } as any);
       }
@@ -1288,7 +1398,7 @@ export default function QuranReaderPage() {
         onTouchEnd={handleTouchEnd}
       >
         {/* Header */}
-        <div className={`sticky top-0 z-30 backdrop-blur-md border-b ${isDark ? 'bg-[#1a1f2e]/95 border-gray-700/50' : 'bg-white/95 border-gray-200/80'}`}>
+        <div ref={headerRef} className={`sticky top-0 z-30 backdrop-blur-md border-b ${isDark ? 'bg-[#1a1f2e]/95 border-gray-700/50' : 'bg-white/95 border-gray-200/80'}`}>
           <div className="max-w-5xl mx-auto px-4 py-2">
             <div className="flex items-center justify-between">
               {/* Title */}
@@ -1399,14 +1509,110 @@ export default function QuranReaderPage() {
           </div>
         </div>
 
-        {/* Main Content */}
+        {/* ── PAGE MODE — full-height no-scroll mushaf ── */}
+        {viewMode === 'page' && (
+          <div
+            ref={mushafNoScrollRef}
+            className={`max-w-3xl mx-auto px-2 flex flex-col overflow-hidden ${isDark ? '' : ''}`}
+            style={{ overflow: 'hidden' }}
+          >
+            {loading ? (
+              <div className="flex-1 flex flex-col items-center justify-center">
+                <Loader2 className="h-10 w-10 text-emerald-500 animate-spin mb-4" />
+                <p className="text-gray-400">Chargement...</p>
+              </div>
+            ) : error ? (
+              <div className="flex-1 flex flex-col items-center justify-center">
+                <p className="text-red-400">{error}</p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="mt-4 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                >
+                  Réessayer
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Compact page info strip */}
+                {pageInfo && (
+                  <div className={`flex items-center justify-between text-[10px] px-1 py-1 flex-shrink-0 ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>
+                    <span>{pageInfo.surahName}</span>
+                    <span>Juz {pageInfo.juz} · {pageInfo.hizbLabel}</span>
+                    <span>صفحة {toArabicNumerals(currentPage)}</span>
+                  </div>
+                )}
+
+                {/* Mushaf no-scroll container — lines fill available height */}
+                <div
+                  className={`mushaf-no-scroll flex-1 min-h-0 ${fontFamily === 'noto' ? 'font-noto' : ''}`}
+                  style={{ fontSize: `${mushafAutoFontSize}px` }}
+                >
+                  {mushafLines.map((line) => {
+                    const si = line.newSurahBefore
+                      ? surahs.find(s => s.id === line.newSurahBefore!.surahNum)
+                      : null;
+                    // Flex weight matches the font-size formula:
+                    // header groups get more space so the header + text line both fit.
+                    const flexWeight = line.newSurahBefore
+                      ? (line.newSurahBefore.hasBismillah ? 3 : 2)
+                      : 1;
+                    return (
+                      <div key={line.lineNum} className="mushaf-line-group" style={{ flex: flexWeight }}>
+                        {/* Surah header (compact) */}
+                        {line.newSurahBefore && (
+                          <div className="surah-header-compact text-center">
+                            <div className="surah-header-box" style={{ display: 'inline-flex', padding: '2px 14px', gap: '8px' }}>
+                              <span
+                                className={`font-bold ${isDark ? 'text-amber-200' : 'text-amber-900'}`}
+                                style={{ fontFamily: "'Amiri Quran', serif", fontSize: `${mushafAutoFontSize * 0.85}px` }}
+                              >
+                                سُورَة {si?.name_arabic}
+                              </span>
+                              {si?.translated_name?.name && (
+                                <span className={`font-medium ${isDark ? 'text-amber-500' : 'text-amber-700'}`}
+                                  style={{ fontSize: `${mushafAutoFontSize * 0.5}px` }}>
+                                  {si.translated_name.name}
+                                </span>
+                              )}
+                            </div>
+                            {line.newSurahBefore.hasBismillah && (
+                              <div className={`bismillah-text ${fontFamily === 'noto' ? 'font-noto' : ''}`}
+                                style={{ fontSize: `${mushafAutoFontSize * 1.1}px` }}>﷽</div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* The mushaf line — each word clickable */}
+                        <div className={`mushaf-line tajweed-text ${fontFamily === 'noto' ? 'font-noto' : ''}`}>
+                          {line.items.map((item, wi) => (
+                            <span
+                              key={wi}
+                              style={{ cursor: 'pointer' }}
+                              onClick={(e) => {
+                                const verse = verses.find(v => v.verse_key === item.verseKey);
+                                if (verse) handleVerseClick(verse, e as unknown as React.MouseEvent);
+                              }}
+                              dangerouslySetInnerHTML={{ __html: item.html }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Main Content — surah / hizb modes */}
+        {viewMode !== 'page' && (
         <div className="max-w-5xl mx-auto px-1 py-4 pb-24">
           {/* Navigation — desktop only, replaced by bottom bar on mobile */}
           <div className="hidden sm:flex items-center justify-between mb-6">
             <button
               onClick={goToPrev}
               disabled={
-                (viewMode === 'page' && currentPage <= 1) ||
                 (viewMode === 'surah' && currentSurah <= 1) ||
                 (viewMode === 'hizb' && currentHizb <= 1)
               }
@@ -1430,7 +1636,6 @@ export default function QuranReaderPage() {
             <button
               onClick={goToNext}
               disabled={
-                (viewMode === 'page' && currentPage >= TOTAL_PAGES) ||
                 (viewMode === 'surah' && currentSurah >= 114) ||
                 (viewMode === 'hizb' && currentHizb >= TOTAL_HIZB)
               }
@@ -1457,67 +1662,6 @@ export default function QuranReaderPage() {
                 >
                   Réessayer
                 </button>
-              </div>
-            ) : viewMode === 'page' ? (
-              /* ── MUSHAF VIEW — exact line layout matching physical Mushaf ── */
-              <div className="mushaf-page">
-                {/* Page info header */}
-                {pageInfo && (
-                  <div className={`flex items-center justify-between text-xs pb-3 mb-5 border-b ${isDark ? 'text-gray-500 border-gray-800' : 'text-gray-400 border-gray-200'}`}>
-                    <span className="font-medium">{pageInfo.surahName}</span>
-                    <span>Juz {pageInfo.juz} · {pageInfo.hizbLabel}</span>
-                    <span className="font-medium">Page {currentPage}</span>
-                  </div>
-                )}
-
-                {/* Mushaf lines — each line is one row of the physical Mushaf */}
-                {mushafLines.map((line) => {
-                  const si = line.newSurahBefore
-                    ? surahs.find(s => s.id === line.newSurahBefore!.surahNum)
-                    : null;
-                  return (
-                    <React.Fragment key={line.lineNum}>
-                      {/* Surah name header before the line where a new surah starts */}
-                      {line.newSurahBefore && (
-                        <div className="text-center my-5">
-                          <div className="surah-header-box">
-                            <span
-                              className={`text-lg font-bold ${isDark ? 'text-amber-200' : 'text-amber-900'}`}
-                              style={{ fontFamily: "'Amiri Quran', serif" }}
-                            >
-                              سُورَة {si?.name_arabic}
-                            </span>
-                            {si?.translated_name?.name && (
-                              <span className={`text-xs font-medium ${isDark ? 'text-amber-500' : 'text-amber-700'}`}>
-                                {si.translated_name.name}
-                              </span>
-                            )}
-                          </div>
-                          {line.newSurahBefore.hasBismillah && (
-                            <p className={`bismillah-text mt-4 ${fontFamily === 'noto' ? 'font-noto' : ''}`}>﷽</p>
-                          )}
-                        </div>
-                      )}
-
-                      {/* The line — each word is individually clickable */}
-                      <div className={`mushaf-line tajweed-text ${fontFamily === 'noto' ? 'font-noto' : ''} ${fontSizes[fontSize]}`}>
-                        {line.items.map((item, wi) => (
-                          <React.Fragment key={wi}>
-                            <span
-                              style={{ cursor: 'pointer' }}
-                              onClick={(e) => {
-                                const verse = verses.find(v => v.verse_key === item.verseKey);
-                                if (verse) handleVerseClick(verse, e as unknown as React.MouseEvent);
-                              }}
-                              dangerouslySetInnerHTML={{ __html: item.html }}
-                            />
-                            {wi < line.items.length - 1 && ' '}
-                          </React.Fragment>
-                        ))}
-                      </div>
-                    </React.Fragment>
-                  );
-                })}
               </div>
             ) : (
               /* ── VERSE-BY-VERSE VIEW (surah / hizb modes) ── */
@@ -1630,9 +1774,10 @@ export default function QuranReaderPage() {
           )}
 
         </div>
+        )} {/* end viewMode !== 'page' */}
 
         {/* Bottom Navigation Bar */}
-        <div className={`fixed bottom-0 left-0 right-0 z-40 border-t backdrop-blur-md ${isDark ? 'bg-[#1a1f2e]/95 border-gray-700/50' : 'bg-white/95 border-gray-200/80'}`}>
+        <div ref={bottomNavRef} className={`fixed bottom-0 left-0 right-0 z-40 border-t backdrop-blur-md ${isDark ? 'bg-[#1a1f2e]/95 border-gray-700/50' : 'bg-white/95 border-gray-200/80'}`}>
           <div className="flex items-center justify-around px-2 py-2 pb-safe">
             {/* Previous */}
             <button

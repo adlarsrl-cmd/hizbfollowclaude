@@ -151,9 +151,10 @@ export interface WordWithLine {
   id: number;
   position: number;
   text_uthmani: string;
+  text_uthmani_tajweed?: string; // Tajweed HTML at word level (if returned by API)
   line_number: number;
   page_number: number;
-  char_type_name: string; // 'word' | 'end' | 'pause'
+  char_type_name: string; // 'word' | 'end' | 'pause' | 'sajdah' | 'rub_el_hizb'
   verse_key: string;
 }
 
@@ -170,19 +171,25 @@ export async function getPageWithWords(
 
   const translationsParam = translations.length > 0 ? `&translations=${translations.join(',')}` : '';
   const response = await fetch(
-    `${API_BASE}/verses/by_page/${pageNumber}?language=fr&words=true&word_fields=text_uthmani,line_number,page_number,char_type_name&fields=text_uthmani_tajweed,juz_number,hizb_number,rub_el_hizb_number&text_type=uthmani${translationsParam}`
+    `${API_BASE}/verses/by_page/${pageNumber}?language=fr&words=true&word_fields=text_uthmani,text_uthmani_tajweed,line_number,page_number,char_type_name&fields=text_uthmani_tajweed,juz_number,hizb_number,rub_el_hizb_number&text_type=uthmani${translationsParam}`
   );
   const data = await response.json();
 
   const allWords: WordWithLine[] = [];
   for (const verse of (data.verses || [])) {
     for (const word of (verse.words || [])) {
+      const wordPage = word.page_number ?? pageNumber;
+      // Only include words that are actually on this page.
+      // The API returns ALL words of a verse even when the verse spans multiple pages,
+      // which would corrupt line grouping if we include words from adjacent pages.
+      if (wordPage !== pageNumber) continue;
       allWords.push({
         id: word.id,
         position: word.position,
         text_uthmani: word.text_uthmani || word.text || '',
+        text_uthmani_tajweed: word.text_uthmani_tajweed || undefined,
         line_number: word.line_number,
-        page_number: word.page_number ?? pageNumber,
+        page_number: wordPage,
         char_type_name: word.char_type_name ?? 'word',
         verse_key: verse.verse_key,
       });
