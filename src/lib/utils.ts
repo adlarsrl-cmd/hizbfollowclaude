@@ -223,13 +223,9 @@ export function calculateWeeklyDeltas(
     } else {
       const prevVal = toH(baseline);
       if (e.is_restart) {
-        if (curr < prevVal) {
-          // Khatma complétée : on a lu jusqu'à 60 puis repris depuis 0
-          delta = (MAX_HIZB - prevVal) + curr;
-        } else {
-          // Nouveau cycle sans wrap apparent : compter depuis 0 jusqu'à curr
-          delta = curr;
-        }
+        // Nouvelle khatma explicite : on ignore la position précédente,
+        // delta = hizb lus depuis 0 dans le nouveau cycle
+        delta = curr;
       } else if ((e.cycle_number ?? 0) > (baseline.cycle_number ?? 0) || curr < prevVal) {
         // Wrap implicite (ex: 54 → 4)
         delta = (MAX_HIZB - prevVal) + curr;
@@ -327,7 +323,8 @@ export function calculateHizbRetard(
     const prevVal = prev.unit_type === 'page' ? toHizb(prev.value_int) : prev.value_int;
 
     if (e.is_restart) {
-      runningTotal += val < prevVal ? (TOTAL_HIZB_LOCAL - prevVal) + val : val;
+      // Nouvelle khatma explicite : delta = val, on ignore la position précédente
+      runningTotal += val;
     } else if ((e.cycle_number ?? 0) > (prev.cycle_number ?? 0) || val < prevVal) {
       runningTotal += (TOTAL_HIZB_LOCAL - prevVal) + val;
     } else {
