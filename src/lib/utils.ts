@@ -175,60 +175,68 @@ export function calculateWeeklyDeltas(
 
   if (!all.length) return [];
 
-  const weekKeys = Array.from(new Set(all.map((e) => getWeekKeyTuesday(new Date(e.recorded_at))))).sort();
+  // Dédupliquer : garder uniquement la dernière entrée par semaine.
+  // Les entrées cross-groupes (même position, plusieurs groupes) doivent compter
+  // une seule fois. On retient l'entrée la plus récente de chaque semaine.
+  // Pour les starting_point, on garde aussi le dernier (utilisé comme baseline).
+  const latestPerWeek = new Map<string, any>();
+  for (const e of all) {
+    const wk = getWeekKeyTuesday(new Date(e.recorded_at));
+    const existing = latestPerWeek.get(wk);
+    const tNew = new Date(e.recorded_at).getTime();
+    const tExist = existing ? new Date(existing.recorded_at).getTime() : -Infinity;
+    // Préférer l'entrée non-starting_point à une starting_point de même semaine
+    if (!existing || tNew > tExist || (tNew === tExist && e.source !== 'starting_point' && existing.source === 'starting_point')) {
+      latestPerWeek.set(wk, e);
+    }
+  }
+
+  const weekKeys = Array.from(latestPerWeek.keys()).sort();
+  const deduped = weekKeys.map(wk => latestPerWeek.get(wk)!);
   const out: { week: string; delta: number }[] = [];
 
-  for (const wk of weekKeys) {
-    const tue = parseWeekKeyTuesday(wk);
-    const ws = new Date(tue); ws.setHours(0, 0, 0, 0);
-    const we = new Date(tue); we.setDate(we.getDate() + 6); we.setHours(23, 59, 59, 999);
+  for (let i = 0; i < deduped.length; i++) {
+    const e = deduped[i];
+    const wk = weekKeys[i];
+    const curr = toH(e);
 
-    // baseline = dernière entrée avant la semaine
-    let baseline: any | null = null;
-    for (let i = all.length - 1; i >= 0; i--) {
-      const t = new Date(all[i].recorded_at).getTime();
-      if (t < ws.getTime()) { baseline = all[i]; break; }
+    // starting_point : ne génère pas de delta, sert juste de baseline
+    if (e.source === 'starting_point') {
+      out.push({ week: wk.split('-W')[1]?.replace('-TUE', '') || wk, delta: 0 });
+      continue;
     }
 
-    const inWeek = all.filter((e) => {
-      const t = new Date(e.recorded_at).getTime();
-      return t >= ws.getTime() && t <= we.getTime();
-    });
-
-    let prev = baseline;
-    let delta = 0;
-
-    for (const e of inWeek) {
-      const curr = toH(e);
-
-      if (!prev) {
-        if (e.source === 'starting_point') { prev = e; continue; }
-        // première vraie saisie sans baseline → tout ce qui est atteint cette semaine
-        delta += curr;
-        prev = e;
-        continue;
+    // Trouver la baseline = dernière entrée non-starting_point avant cette semaine
+    const tue = parseWeekKeyTuesday(wk);
+    const ws = new Date(tue); ws.setHours(0, 0, 0, 0);
+    let baseline: any | null = null;
+    for (let j = all.length - 1; j >= 0; j--) {
+      if (new Date(all[j].recorded_at).getTime() < ws.getTime() && all[j].source !== 'starting_point') {
+        baseline = all[j]; break;
       }
+    }
 
-      const prevVal = toH(prev);
-
-      if (e.source === 'starting_point') {
-        // un point de départ posé dans la semaine ne compte pas comme lecture
-        prev = e; // devient la nouvelle baseline
-        continue;
-      }
-
+    let delta: number;
+    if (!baseline) {
+      // Première saisie sans historique
+      delta = e.is_restart ? curr : curr;
+    } else {
+      const prevVal = toH(baseline);
       if (e.is_restart) {
-        // redémarrage: on a lu "curr" hizb depuis 0
-        delta += curr;
-      } else if ((e.cycle_number ?? 0) > (prev.cycle_number ?? 0) || curr < prevVal) {
-        // ✅ wrap implicite même sans cycle_number (ex: 54 → 4)
-        delta += (MAX_HIZB - prevVal) + curr;
+        if (curr < prevVal) {
+          // Khatma complétée : on a lu jusqu'à 60 puis repris depuis 0
+          delta = (MAX_HIZB - prevVal) + curr;
+        } else {
+          // Nouveau cycle sans wrap apparent : compter depuis 0 jusqu'à curr
+          delta = curr;
+        }
+      } else if ((e.cycle_number ?? 0) > (baseline.cycle_number ?? 0) || curr < prevVal) {
+        // Wrap implicite (ex: 54 → 4)
+        delta = (MAX_HIZB - prevVal) + curr;
       } else {
-        // progression normale
-        delta += Math.max(0, curr - prevVal);
+        // Progression normale
+        delta = Math.max(0, curr - prevVal);
       }
-
-      prev = e;
     }
 
     out.push({ week: wk.split('-W')[1]?.replace('-TUE', '') || wk, delta });
@@ -283,37 +291,45 @@ export function calculateHizbRetard(
 
   if (participantEntries.length === 0) return { retard: 0, status: 'ajour' };
 
-  const firstEntryDate = new Date(participantEntries[0].recorded_at);
+  // Dédupliquer par semaine (même logique que calculateWeeklyDeltas)
+  const latestPerWeek = new Map<string, any>();
+  for (const e of participantEntries) {
+    const wk = getWeekKeyTuesday(new Date(e.recorded_at));
+    const existing = latestPerWeek.get(wk);
+    const tNew = new Date(e.recorded_at).getTime();
+    const tExist = existing ? new Date(existing.recorded_at).getTime() : -Infinity;
+    if (!existing || tNew > tExist || (tNew === tExist && e.source !== 'starting_point' && existing.source === 'starting_point')) {
+      latestPerWeek.set(wk, e);
+    }
+  }
+  const deduped = Array.from(latestPerWeek.values())
+    .sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
+
+  const firstEntryDate = new Date(deduped[0].recorded_at);
   const now = new Date();
   const weeksElapsed = Math.floor((now.getTime() - firstEntryDate.getTime()) / (7 * 24 * 60 * 60 * 1000));
   const expectedHizb = weeksElapsed * weeklyTarget;
 
+  const TOTAL_HIZB_LOCAL = 60;
   let runningTotal = 0;
-  for (let i = 0; i < participantEntries.length; i++) {
-    const e = participantEntries[i];
+  for (let i = 0; i < deduped.length; i++) {
+    const e = deduped[i];
     const val = e.unit_type === 'page' ? toHizb(e.value_int) : e.value_int;
 
-    if (e.source === 'starting_point') {
-      // point de départ: ne change pas le total, sert juste de repère
-      continue;
-    }
+    if (e.source === 'starting_point') continue;
 
-    if (e.is_restart) {
+    if (i === 0 || !deduped[i - 1]) {
       runningTotal += val;
       continue;
     }
 
-    const prev = participantEntries[i - 1];
-    if (!prev) {
-      // première vraie entrée
-      runningTotal += val;
-      continue;
-    }
-
+    const prev = deduped[i - 1];
     const prevVal = prev.unit_type === 'page' ? toHizb(prev.value_int) : prev.value_int;
 
-    if ((e.cycle_number ?? 0) > (prev.cycle_number ?? 0) || val < prevVal) {
-      runningTotal += (TOTAL_HIZB - prevVal) + val;
+    if (e.is_restart) {
+      runningTotal += val < prevVal ? (TOTAL_HIZB_LOCAL - prevVal) + val : val;
+    } else if ((e.cycle_number ?? 0) > (prev.cycle_number ?? 0) || val < prevVal) {
+      runningTotal += (TOTAL_HIZB_LOCAL - prevVal) + val;
     } else {
       runningTotal += Math.max(0, val - prevVal);
     }

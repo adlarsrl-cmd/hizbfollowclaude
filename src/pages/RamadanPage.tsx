@@ -187,6 +187,7 @@ export default function RamadanPage() {
     if (!inputParticipantId || !activeGroupId) return;
     setSaving(true);
     try {
+      // 1. Sauvegarder dans ramadan_entries
       if (todayEntry) {
         await supabase
           .from('ramadan_entries')
@@ -200,11 +201,44 @@ export default function RamadanPage() {
           recorded_date: today,
         });
       }
-      // Mise à jour de la position courante (source de vérité partagée)
+
+      // 2. Mise à jour de la position courante (source de vérité partagée)
       await supabase
         .from('participants')
         .update({ current_hizb: inputHizb })
         .eq('id', inputParticipantId);
+
+      // 3. Synchroniser avec entries (saisie régulière) pour que toutes les vues
+      //    (mensuelle, hebdo, personnel) reflètent la même position.
+      //    Upsert : mettre à jour l'entrée d'aujourd'hui si elle existe, sinon en créer une.
+      const selectedParticipant = allParticipants.find(p => p.id === inputParticipantId);
+      const todayStart = today + 'T00:00:00.000Z';
+      const todayEnd   = today + 'T23:59:59.999Z';
+
+      const existingEntryQuery = selectedParticipant?.user_id
+        ? supabase.from('entries').select('id').eq('user_id', selectedParticipant.user_id)
+            .gte('recorded_at', todayStart).lte('recorded_at', todayEnd).limit(1)
+        : supabase.from('entries').select('id').eq('participant_id', inputParticipantId)
+            .gte('recorded_at', todayStart).lte('recorded_at', todayEnd).limit(1);
+
+      const { data: existingEntries } = await existingEntryQuery;
+      const todayNoon = today + 'T12:00:00.000Z';
+
+      if (existingEntries && existingEntries.length > 0) {
+        await supabase.from('entries')
+          .update({ value_int: inputHizb, recorded_at: todayNoon })
+          .eq('id', existingEntries[0].id);
+      } else {
+        await supabase.from('entries').insert({
+          group_id: activeGroupId,
+          participant_id: inputParticipantId,
+          user_id: selectedParticipant?.user_id ?? null,
+          unit_type: 'hizb',
+          value_int: inputHizb,
+          recorded_at: todayNoon,
+        });
+      }
+
       await loadData();
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
