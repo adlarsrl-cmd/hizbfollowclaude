@@ -22,7 +22,7 @@ import {
 import {
   getSurahs,
   getPageWithWords,
-  getSurahVerses,
+  getSurahVersesAll,
   getHizbVerses,
   type Surah,
   type VerseWithTranslation,
@@ -30,6 +30,7 @@ import {
   TOTAL_PAGES,
   TOTAL_HIZB
 } from '../lib/quranApi';
+import { supabase } from '../lib/supabase';
 import { useAppStore } from '../stores/useAppStore';
 import { useToast } from '../stores/useToast';
 import { getWeekKeyTuesday, tuesdayNoonISO } from '../lib/utils';
@@ -773,7 +774,8 @@ export default function QuranReaderPage() {
     updateEntry,
     fetchEntries,
     user,
-    theme
+    theme,
+    activeGroupId
   } = useAppStore();
 
   const isDark = theme === 'dark';
@@ -893,13 +895,9 @@ export default function QuranReaderPage() {
           setTotalVersePages(1);
           setCurrentVersePage(1);
         } else if (viewMode === 'surah') {
-          const perPage = 50;
-          const result = await getSurahVerses(currentSurah, { 
-            page: currentVersePage, 
-            perPage 
-          });
-          data = result.verses;
-          setTotalVersePages(Math.ceil((result.pagination?.total_count || 0) / perPage));
+          data = await getSurahVersesAll(currentSurah);
+          setTotalVersePages(1);
+          setCurrentVersePage(1);
         } else if (viewMode === 'hizb') {
           data = await getHizbVerses(currentHizb);
           setTotalVersePages(1);
@@ -1178,17 +1176,18 @@ export default function QuranReaderPage() {
       const weekStart = new Date();
       weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
       weekStart.setHours(0, 0, 0, 0);
-      
+
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6);
       weekEnd.setHours(23, 59, 59, 999);
-      
-      const existingEntry = entries.find(e => 
-        e.participant_id === myParticipant.id &&
+
+      // Chercher l'entrée existante par user_id (cross-groupe)
+      const existingEntry = entries.find(e =>
+        e.user_id === user.id &&
         new Date(e.recorded_at) >= weekStart &&
         new Date(e.recorded_at) <= weekEnd
       );
-      
+
       if (existingEntry) {
         await updateEntry(existingEntry.id, {
           value_int: hizbNumber,
@@ -1206,8 +1205,37 @@ export default function QuranReaderPage() {
           note: `Lu jusqu'au verset ${selectedVerse.verse_key}`
         } as any);
       }
-      
-      // Small delay before fetching to ensure DB has propagated the entry
+
+      // Sync : mettre à jour la position courante dans tous les groupes de l'utilisateur
+      await supabase
+        .from('participants')
+        .update({ current_hizb: hizbNumber, updated_at: new Date().toISOString() })
+        .eq('user_id', user.id);
+
+      // Sync Ramadan : upsert l'entrée du jour
+      const today = new Date().toISOString().split('T')[0];
+      const { data: existingRamadan } = await supabase
+        .from('ramadan_entries')
+        .select('id')
+        .eq('participant_id', myParticipant.id)
+        .eq('recorded_date', today)
+        .maybeSingle();
+
+      if (existingRamadan) {
+        await supabase
+          .from('ramadan_entries')
+          .update({ hizb_position: hizbNumber, updated_at: new Date().toISOString() })
+          .eq('id', existingRamadan.id);
+      } else if (activeGroupId) {
+        await supabase.from('ramadan_entries').insert({
+          group_id: activeGroupId,
+          participant_id: myParticipant.id,
+          hizb_position: hizbNumber,
+          recorded_date: today,
+        });
+      }
+
+      // Rafraîchir les entrées
       setTimeout(async () => {
         await fetchEntries();
       }, 500);
@@ -1372,7 +1400,7 @@ export default function QuranReaderPage() {
         </div>
 
         {/* Main Content */}
-        <div className="max-w-5xl mx-auto px-4 py-6 pb-24">
+        <div className="max-w-5xl mx-auto px-1 py-4 pb-24">
           {/* Navigation — desktop only, replaced by bottom bar on mobile */}
           <div className="hidden sm:flex items-center justify-between mb-6">
             <button
@@ -1414,7 +1442,7 @@ export default function QuranReaderPage() {
           </div>
 
           {/* Verses Display */}
-          <div className={`rounded-2xl shadow-2xl border p-3 sm:p-6 md:p-10 ${isDark ? 'bg-[#0f1318] border-gray-800' : 'bg-white border-gray-200'}`}>
+          <div className={`rounded-2xl shadow-2xl border p-2 sm:p-3 ${isDark ? 'bg-[#0f1318] border-gray-800' : 'bg-white border-gray-200'}`}>
             {loading ? (
               <div className="flex flex-col items-center justify-center py-20">
                 <Loader2 className="h-10 w-10 text-emerald-500 animate-spin mb-4" />
@@ -1601,32 +1629,6 @@ export default function QuranReaderPage() {
             </div>
           )}
 
-          {/* Surah Pagination for long surahs */}
-          {viewMode === 'surah' && totalVersePages > 1 && (
-            <div className={`mt-6 flex items-center justify-center gap-4 pt-6 border-t ${isDark ? 'border-gray-800/50' : 'border-gray-200/80'}`}>
-              <button
-                onClick={() => setCurrentVersePage(p => Math.max(1, p - 1))}
-                disabled={currentVersePage === 1}
-                className={`flex items-center gap-2 px-3 sm:px-4 py-2 border rounded-xl disabled:opacity-30 disabled:cursor-not-allowed transition-colors ${isDark ? 'bg-gray-800/50 border-gray-700/50 hover:bg-gray-700/50 text-white' : 'bg-white/80 border-gray-300/80 hover:bg-gray-100/80 text-gray-800'}`}
-              >
-                <ChevronLeft className="h-5 w-5" />
-                <span className="hidden sm:inline text-sm font-medium">Précédent</span>
-              </button>
-
-              <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-                Page {currentVersePage} / {totalVersePages}
-              </span>
-
-              <button
-                onClick={() => setCurrentVersePage(p => Math.min(totalVersePages, p + 1))}
-                disabled={currentVersePage >= totalVersePages}
-                className={`flex items-center gap-2 px-3 sm:px-4 py-2 border rounded-xl disabled:opacity-30 disabled:cursor-not-allowed transition-colors ${isDark ? 'bg-gray-800/50 border-gray-700/50 hover:bg-gray-700/50 text-white' : 'bg-white/80 border-gray-300/80 hover:bg-gray-100/80 text-gray-800'}`}
-              >
-                <span className="hidden sm:inline text-sm font-medium">Suivant</span>
-                <ChevronRight className="h-5 w-5" />
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Bottom Navigation Bar */}

@@ -92,6 +92,36 @@ export async function getSurah(surahNumber: number): Promise<Surah> {
 }
 
 /**
+ * Récupère TOUS les versets d'une sourate en une seule opération (multi-fetch parallèle + cache).
+ * Élimine la pagination côté client — toute la sourate est affichée d'un coup.
+ */
+export async function getSurahVersesAll(
+  surahNumber: number,
+  translations: number[] = [136]
+): Promise<VerseWithTranslation[]> {
+  const cacheKey = `surah-all-${surahNumber}-${translations.join(',')}`;
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+  const perPage = 50;
+  const first = await getSurahVerses(surahNumber, { page: 1, perPage, translations });
+  const total = first.pagination?.total_count || first.verses.length;
+  const totalPages = Math.ceil(total / perPage);
+
+  let allVerses = first.verses;
+
+  if (totalPages > 1) {
+    const remaining = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
+    const results = await Promise.all(
+      remaining.map(page => getSurahVerses(surahNumber, { page, perPage, translations }))
+    );
+    allVerses = [first.verses, ...results.map(r => r.verses)].flat();
+  }
+
+  cache.set(cacheKey, allVerses);
+  return allVerses;
+}
+
+/**
  * Récupère les versets d'une sourate avec Tajweed
  */
 export async function getSurahVerses(
