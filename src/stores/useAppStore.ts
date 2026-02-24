@@ -259,6 +259,14 @@ export const useAppStore = create<AppState>()(
           }
         },
 
+        signInWithApple: async () => {
+          const { error } = await supabase.auth.signInWithOAuth({
+            provider: 'apple',
+            options: { redirectTo: `${window.location.origin}/` },
+          });
+          if (error) throw error;
+        },
+
         signOut: async () => {
           await supabase.auth.signOut();
           set({
@@ -455,10 +463,25 @@ export const useAppStore = create<AppState>()(
               throw new Error(`Erreurs lors de la suppression: ${criticalErrors.join(', ')}`);
             }
 
-            // 16. Clear all local storage
+            // 16. Delete auth.users record via Edge Function (requires service role)
+            try {
+              const { data: { session } } = await supabase.auth.getSession();
+              if (session?.access_token) {
+                const supabaseUrl = (supabase as any).supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
+                await fetch(`${supabaseUrl}/functions/v1/delete-user`, {
+                  method: 'POST',
+                  headers: { Authorization: `Bearer ${session.access_token}` },
+                });
+              }
+            } catch (edgeFnError) {
+              // Non-blocking — app data already deleted above
+              console.warn('Edge Function delete-user error (non-critical):', edgeFnError);
+            }
+
+            // 17. Clear all local storage
             localStorage.clear();
 
-            // 17. Sign out from Supabase (this clears the session)
+            // 18. Sign out from Supabase (this clears the session)
             await supabase.auth.signOut();
 
             // 18. Reset store state

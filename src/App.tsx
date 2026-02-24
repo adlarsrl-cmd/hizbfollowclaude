@@ -22,6 +22,8 @@ const ForgotPasswordPage = React.lazy(() => import('./pages/ForgotPasswordPage')
 const ResetPasswordPage = React.lazy(() => import('./pages/ResetPasswordPage'));
 const QuranReaderPage = React.lazy(() => import('./pages/QuranReaderPage'));
 const RamadanPage = React.lazy(() => import('./pages/RamadanPage'));
+const PrivacyPolicyPage = React.lazy(() => import('./pages/PrivacyPolicyPage'));
+const TermsPage = React.lazy(() => import('./pages/TermsPage'));
 
 function App() {
   const { isAuthenticated, user, enableGroups, fetchMyGroups, checkEmailVerification } = useAppStore();
@@ -83,6 +85,22 @@ function App() {
                 element={
                   <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
                     <QuranReaderPage />
+                  </React.Suspense>
+                }
+              />
+              <Route
+                path="privacy"
+                element={
+                  <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                    <PrivacyPolicyPage />
+                  </React.Suspense>
+                }
+              />
+              <Route
+                path="terms"
+                element={
+                  <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                    <TermsPage />
                   </React.Suspense>
                 }
               />
@@ -196,6 +214,22 @@ function App() {
               element={
                 <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
                   <RamadanPage />
+                </React.Suspense>
+              }
+            />
+            <Route
+              path="privacy"
+              element={
+                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                  <PrivacyPolicyPage />
+                </React.Suspense>
+              }
+            />
+            <Route
+              path="terms"
+              element={
+                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                  <TermsPage />
                 </React.Suspense>
               }
             />
