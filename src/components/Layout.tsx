@@ -292,7 +292,8 @@ export default function Layout() {
       </aside>
 
       {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 z-[60] px-4 flex items-center justify-between">
+      <div className="lg:hidden fixed top-0 left-0 right-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 z-[60]" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+      <div className="h-16 px-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
             <BookOpen className="w-5 h-5 text-white" />
@@ -307,6 +308,7 @@ export default function Layout() {
         >
           {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
         </button>
+      </div>
       </div>
 
       {/* Mobile Drawer */}
@@ -365,7 +367,7 @@ export default function Layout() {
 
       {/* Main Content Area */}
       <main className={`flex-1 min-h-screen transition-all duration-300 ${isMobileMenuOpen ? 'blur-sm lg:blur-0' : ''}`}>
-        <div className="h-16 lg:hidden" /> {/* Spacer for mobile header */}
+        <div className="lg:hidden" style={{ height: 'calc(4rem + env(safe-area-inset-top, 0px))' }} /> {/* Spacer for mobile header + safe area */}
         <div className="p-4 lg:p-8 lg:ml-72 max-w-7xl mx-auto">
           <div className="mb-6 lg:mb-8 animate-fade-in">
             <EmailVerificationBanner />
