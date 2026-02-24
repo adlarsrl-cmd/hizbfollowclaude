@@ -20,6 +20,8 @@ const GroupSettingsPage = React.lazy(() => import('./pages/GroupSettingsPage'));
 const JoinGroupPage = React.lazy(() => import('./pages/JoinGroupPage'));
 const ForgotPasswordPage = React.lazy(() => import('./pages/ForgotPasswordPage'));
 const ResetPasswordPage = React.lazy(() => import('./pages/ResetPasswordPage'));
+const QuranReaderPage = React.lazy(() => import('./pages/QuranReaderPage'));
+const RamadanPage = React.lazy(() => import('./pages/RamadanPage'));
 
 function App() {
   const { isAuthenticated, user, enableGroups, fetchMyGroups, checkEmailVerification } = useAppStore();
@@ -72,6 +74,15 @@ function App() {
                 element={
                   <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
                     <ResetPasswordPage />
+                  </React.Suspense>
+                }
+              />
+              {/* Quran reader accessible without login */}
+              <Route
+                path="quran"
+                element={
+                  <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                    <QuranReaderPage />
                   </React.Suspense>
                 }
               />
@@ -169,6 +180,22 @@ function App() {
               element={
                 <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
                   <JoinGroupPage />
+                </React.Suspense>
+              }
+            />
+            <Route
+              path="quran"
+              element={
+                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                  <QuranReaderPage />
+                </React.Suspense>
+              }
+            />
+            <Route
+              path="ramadan"
+              element={
+                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                  <RamadanPage />
                 </React.Suspense>
               }
             />

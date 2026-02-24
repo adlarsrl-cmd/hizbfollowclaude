@@ -1,5 +1,5 @@
 import { clsx, type ClassValue } from 'clsx';
-import { startOfWeek, addDays, getISOWeek, getYear } from 'date-fns';
+import { startOfWeek, addDays, getISOWeek, getYear, getISOWeekYear } from 'date-fns';
 import { TOTAL_HIZB, TOTAL_PAGES, CONVERSION_FACTORS } from './constants';
 
 /* ------------------------------ UI helpers ------------------------------ */
@@ -27,7 +27,9 @@ export function getJuzFromPages(pages: number): number {
 /** Clé de semaine alignée sur mardi : YYYY-Www-TUE */
 export function getWeekKeyTuesday(date: Date = new Date()): string {
   const tuesday = startOfWeek(date, { weekStartsOn: 2 }); // 2 = Tuesday
-  const year = getYear(tuesday);
+  // Use getISOWeekYear instead of getYear to handle year boundaries correctly
+  // (e.g., Dec 30 2025 might be in week 1 of 2026 according to ISO standard)
+  const year = getISOWeekYear(tuesday);
   const week = getISOWeek(tuesday);
   return `${year}-W${week.toString().padStart(2, '0')}-TUE`;
 }
@@ -60,6 +62,18 @@ export function getWeekBoundsTuesday(d: Date) {
   const start = new Date(tue); start.setHours(0, 0, 0, 0);
   const end = new Date(tue); end.setDate(end.getDate() + 6); end.setHours(23, 59, 59, 999);
   return { start, end };
+}
+
+/** Bornes d'une journée (00:00:00.000 → 23:59:59.999) */
+export function getDayBounds(d: Date) {
+  const start = new Date(d); start.setHours(0, 0, 0, 0);
+  const end = new Date(d); end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
+/** Clé unique pour un jour (YYYY-MM-DD local) */
+export function getDayKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /* --------------------------- Analytics helpers -------------------------- */
@@ -107,25 +121,32 @@ export function validateUnitValue(value: number, unitType: 'hizb' | 'page'): boo
   return value >= 1 && value <= max;
 }
 
+/** Filtre les entrées par user_id (cross-groupe) si disponible, sinon par participant_id */
+function matchParticipant(e: any, participantId: string, userId?: string): boolean {
+  if (userId && e.user_id) return e.user_id === userId;
+  return e.participant_id === participantId;
+}
+
 /** Dernière entrée "réelle" (≠ starting_point) d'un participant */
-export function getLastRealEntry(entries: any[], participantId: string): any | null {
+export function getLastRealEntry(entries: any[], participantId: string, userId?: string): any | null {
   return (
     entries
-      .filter((e) => e.participant_id === participantId)
+      .filter((e) => matchParticipant(e, participantId, userId))
       .filter((e) => e.source !== 'starting_point')
       .sort((a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime())[0] || null
   );
 }
-export function hasRealEntries(entries: any[], participantId: string): boolean {
-  return entries.some((e) => e.participant_id === participantId && e.source !== 'starting_point');
+export function hasRealEntries(entries: any[], participantId: string, userId?: string): boolean {
+  return entries.some((e) => matchParticipant(e, participantId, userId) && e.source !== 'starting_point');
 }
 export function getCurrentPosition(
   entries: any[],
-  participantId: string
+  participantId: string,
+  userId?: string
 ): { value: number; cycle: number; unit: 'hizb' | 'page' } {
   const latestEntry =
     entries
-      .filter((e) => e.participant_id === participantId)
+      .filter((e) => matchParticipant(e, participantId, userId))
       .sort((a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime())[0];
   if (!latestEntry) return { value: 1, cycle: 0, unit: 'hizb' };
   return { value: latestEntry.value_int, cycle: latestEntry.cycle_number || 0, unit: latestEntry.unit_type };
@@ -142,71 +163,76 @@ export function getCurrentPosition(
  */
 export function calculateWeeklyDeltas(
   entries: any[],
-  participantId: string
+  participantId: string,
+  userId?: string
 ): { week: string; delta: number }[] {
   const toH = (e: any) => (e.unit_type === 'page' ? toHizb(e.value_int) : e.value_int);
   const MAX_HIZB = 60;
 
   const all = entries
-    .filter((e) => e.participant_id === participantId)
+    .filter((e) => matchParticipant(e, participantId, userId))
     .sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
 
   if (!all.length) return [];
 
-  const weekKeys = Array.from(new Set(all.map((e) => getWeekKeyTuesday(new Date(e.recorded_at))))).sort();
+  // Dédupliquer : garder uniquement la dernière entrée par semaine.
+  // Les entrées cross-groupes (même position, plusieurs groupes) doivent compter
+  // une seule fois. On retient l'entrée la plus récente de chaque semaine.
+  // Pour les starting_point, on garde aussi le dernier (utilisé comme baseline).
+  const latestPerWeek = new Map<string, any>();
+  for (const e of all) {
+    const wk = getWeekKeyTuesday(new Date(e.recorded_at));
+    const existing = latestPerWeek.get(wk);
+    const tNew = new Date(e.recorded_at).getTime();
+    const tExist = existing ? new Date(existing.recorded_at).getTime() : -Infinity;
+    // Préférer l'entrée non-starting_point à une starting_point de même semaine
+    if (!existing || tNew > tExist || (tNew === tExist && e.source !== 'starting_point' && existing.source === 'starting_point')) {
+      latestPerWeek.set(wk, e);
+    }
+  }
+
+  const weekKeys = Array.from(latestPerWeek.keys()).sort();
+  const deduped = weekKeys.map(wk => latestPerWeek.get(wk)!);
   const out: { week: string; delta: number }[] = [];
 
-  for (const wk of weekKeys) {
-    const tue = parseWeekKeyTuesday(wk);
-    const ws = new Date(tue); ws.setHours(0, 0, 0, 0);
-    const we = new Date(tue); we.setDate(we.getDate() + 6); we.setHours(23, 59, 59, 999);
+  for (let i = 0; i < deduped.length; i++) {
+    const e = deduped[i];
+    const wk = weekKeys[i];
+    const curr = toH(e);
 
-    // baseline = dernière entrée avant la semaine
-    let baseline: any | null = null;
-    for (let i = all.length - 1; i >= 0; i--) {
-      const t = new Date(all[i].recorded_at).getTime();
-      if (t < ws.getTime()) { baseline = all[i]; break; }
+    // starting_point : ne génère pas de delta, sert juste de baseline
+    if (e.source === 'starting_point') {
+      out.push({ week: wk.split('-W')[1]?.replace('-TUE', '') || wk, delta: 0 });
+      continue;
     }
 
-    const inWeek = all.filter((e) => {
-      const t = new Date(e.recorded_at).getTime();
-      return t >= ws.getTime() && t <= we.getTime();
-    });
-
-    let prev = baseline;
-    let delta = 0;
-
-    for (const e of inWeek) {
-      const curr = toH(e);
-
-      if (!prev) {
-        if (e.source === 'starting_point') { prev = e; continue; }
-        // première vraie saisie sans baseline → tout ce qui est atteint cette semaine
-        delta += curr;
-        prev = e;
-        continue;
+    // Trouver la baseline = dernière entrée non-starting_point avant cette semaine
+    const tue = parseWeekKeyTuesday(wk);
+    const ws = new Date(tue); ws.setHours(0, 0, 0, 0);
+    let baseline: any | null = null;
+    for (let j = all.length - 1; j >= 0; j--) {
+      if (new Date(all[j].recorded_at).getTime() < ws.getTime() && all[j].source !== 'starting_point') {
+        baseline = all[j]; break;
       }
+    }
 
-      const prevVal = toH(prev);
-
-      if (e.source === 'starting_point') {
-        // un point de départ posé dans la semaine ne compte pas comme lecture
-        prev = e; // devient la nouvelle baseline
-        continue;
-      }
-
+    let delta: number;
+    if (!baseline) {
+      // Première saisie sans historique
+      delta = e.is_restart ? curr : curr;
+    } else {
+      const prevVal = toH(baseline);
       if (e.is_restart) {
-        // redémarrage: on a lu "curr" hizb depuis 0
-        delta += curr;
-      } else if ((e.cycle_number ?? 0) > (prev.cycle_number ?? 0) || curr < prevVal) {
-        // ✅ wrap implicite même sans cycle_number (ex: 54 → 4)
-        delta += (MAX_HIZB - prevVal) + curr;
+        // Nouvelle khatma explicite : on ignore la position précédente,
+        // delta = hizb lus depuis 0 dans le nouveau cycle
+        delta = curr;
+      } else if ((e.cycle_number ?? 0) > (baseline.cycle_number ?? 0) || curr < prevVal) {
+        // Wrap implicite (ex: 54 → 4)
+        delta = (MAX_HIZB - prevVal) + curr;
       } else {
-        // progression normale
-        delta += Math.max(0, curr - prevVal);
+        // Progression normale
+        delta = Math.max(0, curr - prevVal);
       }
-
-      prev = e;
     }
 
     out.push({ week: wk.split('-W')[1]?.replace('-TUE', '') || wk, delta });
@@ -216,7 +242,7 @@ export function calculateWeeklyDeltas(
 
 /* -------------------- Calculs mensuels & “hizb en retard” ----------------- */
 /** Moyenne hebdo sur un mois (clé "YYYY-MM") */
-export function calculateMonthlyAverages(entries: any[], participantId: string, month: string): number {
+export function calculateMonthlyAverages(entries: any[], participantId: string, month: string, userId?: string): number {
   const [year, monthNum] = month.split('-').map(Number);
 
   // construire les weekKeys (mardis) du mois sélectionné
@@ -233,7 +259,7 @@ export function calculateMonthlyAverages(entries: any[], participantId: string, 
     cur.setDate(cur.getDate() + 7);
   }
 
-  const weekly = calculateWeeklyDeltas(entries, participantId);
+  const weekly = calculateWeeklyDeltas(entries, participantId, userId);
   const deltas = weeks.map((wk) => {
     const num = wk.split('-W')[1]?.replace('-TUE', '');
     const match = weekly.find((w) => w.week === num);
@@ -252,45 +278,55 @@ export function calculateMonthlyAverages(entries: any[], participantId: string, 
 export function calculateHizbRetard(
   entries: any[],
   participantId: string,
-  weeklyTarget: number
+  weeklyTarget: number,
+  userId?: string
 ): { retard: number; status: 'avance' | 'retard' | 'ajour' } {
   const participantEntries = entries
-    .filter((e) => e.participant_id === participantId)
+    .filter((e) => matchParticipant(e, participantId, userId))
     .sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
 
   if (participantEntries.length === 0) return { retard: 0, status: 'ajour' };
 
-  const firstEntryDate = new Date(participantEntries[0].recorded_at);
+  // Dédupliquer par semaine (même logique que calculateWeeklyDeltas)
+  const latestPerWeek = new Map<string, any>();
+  for (const e of participantEntries) {
+    const wk = getWeekKeyTuesday(new Date(e.recorded_at));
+    const existing = latestPerWeek.get(wk);
+    const tNew = new Date(e.recorded_at).getTime();
+    const tExist = existing ? new Date(existing.recorded_at).getTime() : -Infinity;
+    if (!existing || tNew > tExist || (tNew === tExist && e.source !== 'starting_point' && existing.source === 'starting_point')) {
+      latestPerWeek.set(wk, e);
+    }
+  }
+  const deduped = Array.from(latestPerWeek.values())
+    .sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
+
+  const firstEntryDate = new Date(deduped[0].recorded_at);
   const now = new Date();
   const weeksElapsed = Math.floor((now.getTime() - firstEntryDate.getTime()) / (7 * 24 * 60 * 60 * 1000));
   const expectedHizb = weeksElapsed * weeklyTarget;
 
+  const TOTAL_HIZB_LOCAL = 60;
   let runningTotal = 0;
-  for (let i = 0; i < participantEntries.length; i++) {
-    const e = participantEntries[i];
+  for (let i = 0; i < deduped.length; i++) {
+    const e = deduped[i];
     const val = e.unit_type === 'page' ? toHizb(e.value_int) : e.value_int;
 
-    if (e.source === 'starting_point') {
-      // point de départ: ne change pas le total, sert juste de repère
-      continue;
-    }
+    if (e.source === 'starting_point') continue;
 
-    if (e.is_restart) {
+    if (i === 0 || !deduped[i - 1]) {
       runningTotal += val;
       continue;
     }
 
-    const prev = participantEntries[i - 1];
-    if (!prev) {
-      // première vraie entrée
-      runningTotal += val;
-      continue;
-    }
-
+    const prev = deduped[i - 1];
     const prevVal = prev.unit_type === 'page' ? toHizb(prev.value_int) : prev.value_int;
 
-    if ((e.cycle_number ?? 0) > (prev.cycle_number ?? 0) || val < prevVal) {
-      runningTotal += (TOTAL_HIZB - prevVal) + val;
+    if (e.is_restart) {
+      // Nouvelle khatma explicite : delta = val, on ignore la position précédente
+      runningTotal += val;
+    } else if ((e.cycle_number ?? 0) > (prev.cycle_number ?? 0) || val < prevVal) {
+      runningTotal += (TOTAL_HIZB_LOCAL - prevVal) + val;
     } else {
       runningTotal += Math.max(0, val - prevVal);
     }

@@ -60,7 +60,7 @@ export default function Dashboard() {
     // index des deltas hebdo par participant sur la semaine courante
     const weekNum = currentWeekKey.split('-W')[1]?.replace('-TUE', '') || '';
     const perParticipantDelta = active.map(p => {
-      const deltas = calculateWeeklyDeltas(entries, p.id); // [{week:'43', delta: X}, ...]
+      const deltas = calculateWeeklyDeltas(entries, p.id, p.user_id); // [{week:'43', delta: X}, ...]
       const delta = deltas.find(d => d.week === weekNum)?.delta ?? 0;
       return { participant: p, delta };
     });
@@ -202,7 +202,7 @@ export default function Dashboard() {
         const weekNum = currentWeekKey.split('-W')[1]?.replace('-TUE', '') || '';
 
         const participantDeltas = allParticipants.map(p => {
-          const deltas = calculateWeeklyDeltas(allEntries, p.id);
+          const deltas = calculateWeeklyDeltas(allEntries, p.id, p.user_id);
           const delta = deltas.find(d => d.week === weekNum)?.delta ?? 0;
           return { participant: p, delta };
         });
@@ -242,7 +242,7 @@ export default function Dashboard() {
     // Fallback to local calculation
     const sorted = participants
       .map(p => {
-        const deltas = calculateWeeklyDeltas(entries, p.id);
+        const deltas = calculateWeeklyDeltas(entries, p.id, p.user_id);
         const currentWeekKey = getWeekKeyTuesday(new Date());
         const weekNum = currentWeekKey.split('-W')[1]?.replace('-TUE', '') || '';
         const delta = deltas.find(d => d.week === weekNum)?.delta ?? 0;
@@ -263,31 +263,31 @@ export default function Dashboard() {
         {/* Member Rank Banner */}
         {isMember && myRankInfo && myRankInfo.rank > 0 && (
           <div className="bg-gradient-to-r from-purple-500 to-indigo-600 rounded-lg p-4 text-white">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-bold">🏆 Votre classement cette semaine</h2>
-                <p className="text-purple-100">
-                  Vous êtes <span className="font-bold text-xl">{myRankInfo.rank}</span>ème sur {myRankInfo.total} participants actifs
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-base sm:text-lg font-bold">🏆 Votre classement cette semaine</h2>
+                <p className="text-purple-100 text-sm sm:text-base">
+                  Vous êtes <span className="font-bold text-lg sm:text-xl">{myRankInfo.rank}</span>ème sur {myRankInfo.total} participants actifs
                 </p>
               </div>
-              <Award className="h-12 w-12 text-purple-200" />
+              <Award className="h-10 w-10 sm:h-12 sm:w-12 text-purple-200 flex-shrink-0" />
             </div>
           </div>
         )}
 
         {/* Welcome */}
-        <div className="relative overflow-hidden bg-gradient-to-br from-emerald-600 to-teal-700 rounded-3xl p-8 text-white shadow-xl shadow-emerald-500/20">
+        <div className="relative overflow-hidden bg-gradient-to-br from-emerald-600 to-teal-700 rounded-3xl p-6 sm:p-8 text-white shadow-xl shadow-emerald-500/20">
           <div className="absolute top-0 right-0 -mt-4 -mr-4 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
           <div className="absolute bottom-0 left-0 -mb-4 -ml-4 w-24 h-24 bg-black/10 rounded-full blur-xl"></div>
-          
+
           <div className="relative z-10">
-            <h1 className="text-3xl font-bold mb-3 tracking-tight">Bienvenue sur HizbFollow</h1>
-            <p className="text-emerald-100 text-lg max-w-2xl font-light">
+            <h1 className="text-2xl sm:text-3xl font-bold mb-3 tracking-tight">Bienvenue sur HizbFollow</h1>
+            <p className="text-emerald-100 text-base sm:text-lg max-w-2xl font-light">
               {isMember 
                 ? "Suivez votre progression personnelle dans la lecture du Saint Coran"
                 : "Suivez votre progression et celle de votre groupe dans la lecture du Saint Coran"
               }
-            </p>
+          </p>
           </div>
         </div>
 

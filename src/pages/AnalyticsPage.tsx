@@ -43,10 +43,19 @@ export default function AnalyticsPage() {
     currentUnit,
     fetchParticipants,
     fetchEntries,
-    loading
+    loading,
+    currentUserRole
   } = useAppStore();
 
   const isLoading = loading.participants || loading.entries;
+
+  // Responsive: detect mobile for chart adjustments
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 640);
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
 
   // état sélection participants
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
@@ -167,9 +176,9 @@ export default function AnalyticsPage() {
 
     return filteredParticipants
       .map(participant => {
-        const average = calculateMonthlyAverages(entries, participant.id, selectedMonth);
-        const comparisonAverage = comparisonMode && comparisonMonth 
-          ? calculateMonthlyAverages(entries, participant.id, comparisonMonth)
+        const average = calculateMonthlyAverages(entries, participant.id, selectedMonth, participant.user_id);
+        const comparisonAverage = comparisonMode && comparisonMonth
+          ? calculateMonthlyAverages(entries, participant.id, comparisonMonth, participant.user_id)
           : null;
 
         return {
@@ -189,7 +198,7 @@ export default function AnalyticsPage() {
     const buildForWeeks = (weeks: { weekKey: string; date: string; fullDate: Date; monthLabel?: string }[]) => {
       const chartData = filteredParticipants.map(participant => {
         const row: any = { name: participant.name, participant_id: participant.id };
-        const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id);
+        const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id, participant.user_id);
         const deltaMap = new Map(weeklyDeltas.map(w => [w.week, w.delta]));
 
         weeks.forEach(week => {
@@ -292,7 +301,7 @@ export default function AnalyticsPage() {
         participant_id: participant.id,
         target: participant.weekly_target_hizb || 7
       };
-      const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id);
+      const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id, participant.user_id);
       const deltaMap = new Map(weeklyDeltas.map(w => [w.week, w.delta]));
 
       weeks.forEach(week => {
@@ -327,7 +336,7 @@ export default function AnalyticsPage() {
       };
 
       months.forEach(monthKey => {
-        const average = calculateMonthlyAverages(entries, participant.id, monthKey);
+        const average = calculateMonthlyAverages(entries, participant.id, monthKey, participant.user_id);
         row[monthKey] = Math.round(average * 100) / 100;
       });
 
@@ -356,6 +365,67 @@ export default function AnalyticsPage() {
     return { activeParticipants: active, thisWeekEntries: count, thisWeekTotal: total };
   }, [participants, byParticipant]);
 
+  // ── Member-specific computations ──────────────────────────────────────
+  const memberParticipant = useMemo(
+    () => (currentUserRole === 'member' ? participants[0] ?? null : null),
+    [currentUserRole, participants]
+  );
+
+  const memberStats = useMemo(() => {
+    if (!memberParticipant) return null;
+    const target = memberParticipant.weekly_target_hizb || 7;
+    const weeklyDeltas = calculateWeeklyDeltas(entries, memberParticipant.id, memberParticipant.user_id);
+    const totalHizb = weeklyDeltas.reduce((s, w) => s + w.delta, 0);
+    const khatmas = Math.floor(totalHizb / 60);
+    const progressInCycle = totalHizb % 60;
+
+    const last8 = weeklyDeltas.slice(-8);
+    const weeklyAverage = last8.length
+      ? Math.round((last8.reduce((s, w) => s + w.delta, 0) / last8.length) * 10) / 10
+      : 0;
+    const bestVal = weeklyDeltas.reduce((m, w) => Math.max(m, w.delta), 0);
+
+    let currentStreak = 0;
+    for (let i = weeklyDeltas.length - 1; i >= 0; i--) {
+      if (weeklyDeltas[i].delta >= target) currentStreak++;
+      else break;
+    }
+
+    const hizbRetard = calculateHizbRetard(entries, memberParticipant.id, target, memberParticipant.user_id);
+
+    let prediction: string | null = null;
+    if (weeklyAverage > 0) {
+      const remaining = Math.max(0, 60 - progressInCycle);
+      const weeksRemaining = Math.ceil(remaining / weeklyAverage);
+      const d = new Date();
+      d.setDate(d.getDate() + weeksRemaining * 7);
+      prediction = d.toLocaleDateString('fr-FR');
+    }
+
+    return { khatmas, progressInCycle, weeklyAverage, bestVal, currentStreak, hizbRetard, prediction, target };
+  }, [memberParticipant, entries]);
+
+  const memberChartData = useMemo(() => {
+    if (!memberParticipant) return [];
+    const weeklyDeltas = calculateWeeklyDeltas(entries, memberParticipant.id, memberParticipant.user_id);
+    const deltaMap = new Map(weeklyDeltas.map(w => [w.week, w.delta]));
+    const now = new Date();
+    const weeks = [];
+    for (let i = 7; i >= 0; i--) {
+      const anchor = new Date(now);
+      anchor.setDate(anchor.getDate() - i * 7);
+      const weekKey = getWeekKeyTuesday(anchor);
+      const weekNum = weekKey.split('-W')[1]?.replace('-TUE', '') || '';
+      const tue = parseWeekKeyTuesday(weekKey);
+      weeks.push({
+        label: tue.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
+        value: deltaMap.get(weekNum) || 0
+      });
+    }
+    return weeks;
+  }, [memberParticipant, entries]);
+  // ───────────────────────────────────────────────────────────────────────
+
   // export CSV (classement mensuel)
   const exportCSV = () => {
     const data = monthlyData.map(item => ({
@@ -375,6 +445,168 @@ export default function AnalyticsPage() {
   };
 
   const colors = ['#059669', '#0891b2', '#7c3aed', '#dc2626', '#ea580c', '#ca8a04', '#0ea5e9', '#16a34a'];
+
+  /* ── Member view ─────────────────────────────────────────────────── */
+  if (currentUserRole === 'member') {
+    if (isLoading) {
+      return (
+        <div className="max-w-sm mx-auto px-4 pt-4 pb-12 flex flex-col gap-8">
+          <Skeleton className="h-16 w-48 rounded-2xl" />
+          <div className="grid grid-cols-2 gap-3">
+            {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}
+          </div>
+          <Skeleton className="h-2 rounded-full" />
+          <Skeleton className="h-40 rounded-2xl" />
+        </div>
+      );
+    }
+
+    if (!memberParticipant || !memberStats) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[50vh] text-center px-6">
+          <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4 text-2xl">📊</div>
+          <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Aucune donnée</h3>
+          <p className="text-sm text-slate-500 dark:text-slate-400 max-w-xs">Ajoutez des entrées pour voir vos statistiques.</p>
+        </div>
+      );
+    }
+
+    const { khatmas, progressInCycle, weeklyAverage, bestVal, currentStreak, hizbRetard, prediction, target } = memberStats;
+
+    return (
+      <div className="max-w-sm mx-auto px-4 pt-4 pb-12 flex flex-col gap-8">
+
+        {/* Header */}
+        <div>
+          <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">Mes statistiques</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white leading-tight">{memberParticipant.name}</h1>
+          <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">
+            {khatmas} khatma{khatmas > 1 ? 's' : ''} · objectif {target} {currentUnit}/sem
+          </p>
+        </div>
+
+        {/* KPI 2×2 */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-slate-100 dark:bg-slate-800 rounded-2xl p-4">
+            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">Moyenne (8 sem)</p>
+            <p className="text-3xl font-bold text-slate-900 dark:text-white">{weeklyAverage}</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">hizb/sem</p>
+          </div>
+          <div className="bg-slate-100 dark:bg-slate-800 rounded-2xl p-4">
+            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">Record hebdo</p>
+            <p className="text-3xl font-bold text-slate-900 dark:text-white">{bestVal}</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">hizb</p>
+          </div>
+          <div className="bg-slate-100 dark:bg-slate-800 rounded-2xl p-4">
+            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">Série actuelle</p>
+            <p className="text-3xl font-bold text-slate-900 dark:text-white">
+              {currentStreak > 0 ? currentStreak : '—'}
+            </p>
+            {currentStreak > 0 && <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">sem 🔥</p>}
+          </div>
+          <div className={`rounded-2xl p-4 ${
+            hizbRetard.status === 'retard'
+              ? 'bg-rose-50 dark:bg-rose-900/20'
+              : hizbRetard.status === 'avance'
+              ? 'bg-blue-50 dark:bg-blue-900/20'
+              : 'bg-emerald-50 dark:bg-emerald-900/20'
+          }`}>
+            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">Statut</p>
+            <p className={`text-3xl font-bold ${
+              hizbRetard.status === 'retard'
+                ? 'text-rose-600 dark:text-rose-400'
+                : hizbRetard.status === 'avance'
+                ? 'text-blue-600 dark:text-blue-400'
+                : 'text-emerald-600 dark:text-emerald-400'
+            }`}>
+              {hizbRetard.status === 'retard'
+                ? `-${hizbRetard.retard}`
+                : hizbRetard.status === 'avance'
+                ? `+${hizbRetard.retard}`
+                : '✓'}
+            </p>
+            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+              {hizbRetard.status === 'retard'
+                ? 'hizb de retard'
+                : hizbRetard.status === 'avance'
+                ? "hizb d'avance"
+                : 'À jour'}
+            </p>
+          </div>
+        </div>
+
+        {/* Progress cycle */}
+        <div className="space-y-1.5">
+          <div className="flex justify-between text-xs text-slate-400 dark:text-slate-500">
+            <span>Cycle en cours · hizb {progressInCycle} / 60</span>
+            <span>{Math.round(progressInCycle / 60 * 100)}%</span>
+          </div>
+          <div className="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+              style={{ width: `${Math.max(2, progressInCycle / 60 * 100)}%` }}
+            />
+          </div>
+          {prediction && (
+            <p className="text-xs text-slate-400 dark:text-slate-500 pt-0.5">
+              Khatma estimée le{' '}
+              <span className="text-purple-600 dark:text-purple-400 font-medium">{prediction}</span>
+            </p>
+          )}
+        </div>
+
+        {/* Weekly chart */}
+        <div>
+          <p className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4">
+            8 dernières semaines
+          </p>
+          <div className="h-44">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={memberChartData} margin={{ top: 4, right: 0, left: -24, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 9, fill: '#94a3b8' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <ReferenceLine
+                  y={target}
+                  stroke="#10b981"
+                  strokeDasharray="4 4"
+                  strokeWidth={1.5}
+                />
+                <Tooltip
+                  formatter={(v: any) => [`${v} hizb`, 'Lecture']}
+                  contentStyle={{
+                    background: 'rgba(15,23,42,0.92)',
+                    border: 'none',
+                    borderRadius: '12px',
+                    color: '#f1f5f9',
+                    fontSize: 12,
+                    padding: '8px 12px'
+                  }}
+                  cursor={{ fill: 'rgba(16,185,129,0.08)' }}
+                  labelStyle={{ color: '#94a3b8', fontSize: 10 }}
+                />
+                <Bar dataKey="value" fill="#059669" radius={[4, 4, 0, 0]} maxBarSize={28} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500 text-center mt-1">
+            — objectif {target} hizb/sem
+          </p>
+        </div>
+
+      </div>
+    );
+  }
+  /* ──────────────────────────────────────────────────────────────────── */
 
   return (
     <div className="space-y-6">
@@ -397,7 +629,7 @@ export default function AnalyticsPage() {
 
       {/* Sélection participants */}
       <div className="glass-panel rounded-2xl p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
           <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center">
             <Users className="h-5 w-5 text-emerald-600 dark:text-emerald-400 mr-2" />
             Sélection des participants
@@ -436,7 +668,7 @@ export default function AnalyticsPage() {
 
       {/* Tableau hebdo (timeline/heatmap/table) */}
       <div className="glass-panel rounded-2xl p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <div className="p-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
@@ -481,10 +713,13 @@ export default function AnalyticsPage() {
           <>
             {/* Heatmap colorée avec tendances */}
             <div className="mb-8">
-              <div className="flex items-center gap-4 mb-4 text-xs font-medium">
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-emerald-500 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Objectif atteint</span></div>
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-amber-400 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Moyen</span></div>
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-500 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Faible</span></div>
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <div className="flex flex-wrap items-center gap-3 text-xs font-medium">
+                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-emerald-500 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Objectif atteint</span></div>
+                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-amber-400 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Moyen</span></div>
+                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-500 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Faible</span></div>
+                </div>
+                <span className="text-[10px] text-slate-400 dark:text-slate-500 sm:hidden flex items-center gap-1">← Glisser →</span>
               </div>
 
               <div className="overflow-x-auto pb-2">
@@ -512,7 +747,7 @@ export default function AnalyticsPage() {
                       </div>
                       <div className="w-16 p-2 flex items-center justify-center">
                         <div className="text-center text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg px-2 py-1 font-bold">
-                          {data.target}
+                        {data.target}
                         </div>
                       </div>
                       {weeks.map((w: any) => {
@@ -569,7 +804,7 @@ export default function AnalyticsPage() {
 
       {/* Moyennes mensuelles */}
       <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">📊 Moyennes mensuelles</h2>
             <button
@@ -580,9 +815,9 @@ export default function AnalyticsPage() {
               {showMonthlyTable ? 'Masquer' : 'Afficher'}
             </button>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-600 dark:text-gray-400">De:</label>
+              <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">De:</label>
               <input
                 type="month"
                 value={monthlyFromDate}
@@ -591,7 +826,7 @@ export default function AnalyticsPage() {
               />
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-600 dark:text-gray-400">À:</label>
+              <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">À:</label>
               <input
                 type="month"
                 value={monthlyToDate}
@@ -613,10 +848,13 @@ export default function AnalyticsPage() {
           </div>
         ) : showMonthlyTable && (
           <>
-            <div className="flex items-center gap-4 mb-4 text-sm">
-              <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Objectif atteint</span></div>
-              <div className="flex items-center gap-2"><div className="w-4 h-4 bg-yellow-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Progression moyenne</span></div>
-              <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Faible progression</span></div>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Objectif atteint</span></div>
+                <div className="flex items-center gap-2"><div className="w-4 h-4 bg-yellow-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Progression moyenne</span></div>
+                <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Faible progression</span></div>
+              </div>
+              <span className="text-[10px] text-gray-400 dark:text-gray-500 sm:hidden">← Glisser →</span>
             </div>
 
             <div className="overflow-x-auto">
@@ -696,7 +934,7 @@ export default function AnalyticsPage() {
 
       {/* Analyse mensuelle (graph classement) */}
       <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div className="flex items-center">
             <BarChart3 className="h-5 w-5 text-emerald-600 dark:text-emerald-400 mr-2" />
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Analyse mensuelle</h2>
@@ -721,8 +959,8 @@ export default function AnalyticsPage() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 {comparisonMode ? 'Mois 1 (principal)' : 'Mois à analyser'}
               </label>
-              <select
-                value={selectedMonth}
+          <select
+            value={selectedMonth}
                 onChange={(e) => {
                   setSelectedMonth(e.target.value);
                   // Reset comparison month if it's the same as selected month
@@ -731,15 +969,15 @@ export default function AnalyticsPage() {
                   }
                 }}
                 className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-              >
-                {availableMonths.map(m => {
-                  const [y, mNum] = m.split('-').map(Number);
-                  const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-                  return <option key={m} value={m}>{monthName}</option>;
-                })}
-              </select>
-            </div>
-            
+          >
+            {availableMonths.map(m => {
+              const [y, mNum] = m.split('-').map(Number);
+              const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+              return <option key={m} value={m}>{monthName}</option>;
+            })}
+          </select>
+        </div>
+
             {comparisonMode && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Mois 2 (comparaison)</label>
@@ -772,14 +1010,14 @@ export default function AnalyticsPage() {
             <p className="text-gray-600 dark:text-gray-400">Aucune donnée disponible pour ce mois</p>
           </div>
         ) : (
-          <div className="h-80">
+          <div className="h-64 sm:h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={monthlyData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+              <BarChart data={monthlyData} margin={{ top: 10, right: isMobile ? 10 : 30, left: isMobile ? 0 : 20, bottom: isMobile ? 40 : 60 }}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" angle={-45} textAnchor="end" height={80} interval={0} />
-                <YAxis label={{ value: 'Hizb/semaine', angle: -90, position: 'insideLeft' }} />
-                <ReferenceLine y={7} stroke="red" strokeDasharray="4 4" label="7" />
-                <ReferenceLine y={14} stroke="red" strokeDasharray="4 4" label="14" />
+                <XAxis dataKey="name" angle={-40} textAnchor="end" height={isMobile ? 50 : 80} interval={0} tick={{ fontSize: isMobile ? 10 : 12 }} />
+                <YAxis width={isMobile ? 30 : 50} label={isMobile ? undefined : { value: 'Hizb/semaine', angle: -90, position: 'insideLeft' }} tick={{ fontSize: isMobile ? 10 : 12 }} />
+                <ReferenceLine y={7} stroke="red" strokeDasharray="4 4" label={isMobile ? undefined : "7"} />
+                <ReferenceLine y={14} stroke="red" strokeDasharray="4 4" label={isMobile ? undefined : "14"} />
                 <Tooltip
                   formatter={(value: any, name: any) => {
                     if (comparisonMode && comparisonMonth) {
@@ -790,21 +1028,21 @@ export default function AnalyticsPage() {
                   labelStyle={{ color: '#374151' }}
                   contentStyle={{ backgroundColor: '#f9fafb', border: '1px solid #d1d5db', borderRadius: '6px' }}
                 />
-                <Legend />
-                <Bar 
-                  dataKey="average" 
-                  fill="#059669" 
-                  radius={[4, 4, 0, 0]} 
-                  name={comparisonMode && comparisonMonth 
+                <Legend wrapperStyle={{ fontSize: isMobile ? '11px' : '12px' }} />
+                <Bar
+                  dataKey="average"
+                  fill="#059669"
+                  radius={[4, 4, 0, 0]}
+                  name={comparisonMode && comparisonMonth
                     ? `${new Date(parseInt(selectedMonth.split('-')[0]), parseInt(selectedMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })}`
                     : "Moyenne hebdomadaire"
-                  } 
+                  }
                 />
                 {comparisonMode && comparisonMonth && (
-                  <Bar 
-                    dataKey="comparisonAverage" 
-                    fill="#0891b2" 
-                    radius={[4, 4, 0, 0]} 
+                  <Bar
+                    dataKey="comparisonAverage"
+                    fill="#0891b2"
+                    radius={[4, 4, 0, 0]}
                     name={`${new Date(parseInt(comparisonMonth.split('-')[0]), parseInt(comparisonMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })}`}
                   />
                 )}
@@ -816,7 +1054,7 @@ export default function AnalyticsPage() {
 
       {/* Lectures hebdomadaires (graph multi-séries) */}
       <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div className="flex items-center">
             <Calendar className="h-5 w-5 text-blue-600 dark:text-blue-400 mr-2" />
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Lectures hebdomadaires</h2>
@@ -866,12 +1104,12 @@ export default function AnalyticsPage() {
             {/* Contrôles conditionnels */}
             {weeklyReadingsMode === 'month' ? (
               <div className={comparisonMode ? 'grid grid-cols-1 md:grid-cols-2 gap-4 w-full' : ''}>
-                <div>
+              <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     {comparisonMode ? 'Mois 1 (principal)' : 'Mois à analyser'}
                   </label>
-                  <select
-                    value={selectedMonth}
+                <select
+                  value={selectedMonth}
                     onChange={(e) => {
                       setSelectedMonth(e.target.value);
                       // Reset comparison month if it's the same as selected month
@@ -880,13 +1118,13 @@ export default function AnalyticsPage() {
                       }
                     }}
                     className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-                  >
-                    {availableMonths.map(m => {
-                      const [y, mNum] = m.split('-').map(Number);
-                      const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-                      return <option key={m} value={m}>{monthName}</option>;
-                    })}
-                  </select>
+                >
+                  {availableMonths.map(m => {
+                    const [y, mNum] = m.split('-').map(Number);
+                    const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+                    return <option key={m} value={m}>{monthName}</option>;
+                  })}
+                </select>
                 </div>
                 {comparisonMode && (
                   <div>
@@ -944,21 +1182,21 @@ export default function AnalyticsPage() {
             <p className="text-gray-600 dark:text-gray-400">Aucune donnée hebdomadaire disponible</p>
           </div>
         ) : (
-          <div className="h-80">
+          <div className="h-64 sm:h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weeklyData.chartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+              <BarChart data={weeklyData.chartData} margin={{ top: 10, right: isMobile ? 10 : 30, left: isMobile ? 0 : 20, bottom: isMobile ? 40 : 60 }}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" angle={-45} textAnchor="end" height={80} interval={0} />
-                <YAxis label={{ value: 'Hizb', angle: -90, position: 'insideLeft' }} />
+                <XAxis dataKey="name" angle={-40} textAnchor="end" height={isMobile ? 50 : 80} interval={0} tick={{ fontSize: isMobile ? 10 : 12 }} />
+                <YAxis width={isMobile ? 30 : 50} label={isMobile ? undefined : { value: 'Hizb', angle: -90, position: 'insideLeft' }} tick={{ fontSize: isMobile ? 10 : 12 }} />
                 {/* lignes d'objectif */}
-                <ReferenceLine y={7} stroke="red" strokeDasharray="4 4" label="7" />
-                <ReferenceLine y={14} stroke="red" strokeDasharray="4 4" label="14" />
+                <ReferenceLine y={7} stroke="red" strokeDasharray="4 4" label={isMobile ? undefined : "7"} />
+                <ReferenceLine y={14} stroke="red" strokeDasharray="4 4" label={isMobile ? undefined : "14"} />
                 <Tooltip
                   formatter={(value: any, name: any) => [`${value} hizb`, `Semaine du ${name}`]}
                   labelStyle={{ color: '#374151' }}
                   contentStyle={{ backgroundColor: '#f9fafb', border: '1px solid #d1d5db', borderRadius: '6px' }}
                 />
-                <Legend />
+                <Legend wrapperStyle={{ fontSize: isMobile ? '11px' : '12px' }} />
                 {weeklyData.weeks?.map((w: any, index: number) => {
                   const dataKey = w.monthLabel ? `${w.date}_${w.monthLabel}` : w.date;
                   const monthName = w.monthLabel === 'comp' && comparisonMonth
@@ -1016,7 +1254,7 @@ export default function AnalyticsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
           {filteredParticipants.map((participant) => {
             // cumul réel = somme des deltas (toutes semaines)
-            const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id);
+            const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id, participant.user_id);
             const totalHizb = weeklyDeltas.reduce((sum, w) => sum + w.delta, 0);
             const khatmas = Math.floor(totalHizb / 60);
             const progressInCycle = totalHizb % 60;
@@ -1060,7 +1298,7 @@ export default function AnalyticsPage() {
             })();
 
             // calcul hizb en retard
-            const hizbRetard = calculateHizbRetard(entries, participant.id, target);
+            const hizbRetard = calculateHizbRetard(entries, participant.id, target, participant.user_id);
 
             // prédiction (reste dans le cycle courant)
             let prediction: string | null = null;
@@ -1127,7 +1365,7 @@ export default function AnalyticsPage() {
                     <div className="text-right">
                       <span className="text-sm font-bold text-slate-900 dark:text-white block">
                         {currentStreak > 0 ? `${currentStreak} sem 🔥` : '-'}
-                      </span>
+                    </span>
                       {bestStreak > currentStreak && (
                         <span className="text-[10px] text-slate-400 block">Record: {bestStreak}</span>
                       )}
