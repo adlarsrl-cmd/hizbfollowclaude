@@ -84,6 +84,7 @@
 | 26 | **Partage de verset** — image partageable (verset + numéro + fond islamique) via Share API native | 🟡 Moyen | |
 | 27 | **Surah info** — afficher lieu de révélation, nombre de versets, thème avant de lire | 🟢 Nice | |
 | 28 | **Annotations personnelles** — ajouter une note sur un verset (stockée en DB) | 🟢 Nice | |
+| 114 | **Riwaya Warsh (mode page image)** — afficher le Mushaf Warsh (riwayat Nafi') en pages JPG scannées ; toggle Hafs/Warsh dans les paramètres du lecteur. ⚠️ Aucune API publique ne fournit les données Warsh mot par mot avec page/ligne — le rendu texte exact est impossible sans accès à la BDD privée de quran_android ou au Complexe du Roi Fahd. L'approche retenue est donc image-based (perte du tajweed coloré et de l'interaction mot par mot). | 🟡 Moyen | |
 
 ---
 
