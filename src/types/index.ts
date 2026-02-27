@@ -97,13 +97,18 @@ export interface GroupMember {
 }
 
 export interface UserProfile {
+  id?: string;
   user_id: string;
   full_name?: string;
   display_name?: string;
   email?: string;
   avatar_url?: string;
-  locale: string;
+  locale?: string;
   deleted_at?: string;
+  // Champs personnels (sans groupe requis)
+  current_hizb?: number;
+  current_page?: number;
+  daily_target_hizb?: number;
 }
 
 export interface GroupInvite {

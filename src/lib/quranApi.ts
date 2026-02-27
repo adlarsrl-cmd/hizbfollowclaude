@@ -1,9 +1,12 @@
 /**
- * Quran.com API Service
- * Documentation: https://api-docs.quran.com/
+ * Quran Foundation API — via Supabase Edge Function proxy.
+ * The proxy handles OAuth2 client credentials (secret stays server-side).
+ * Documentation: https://api-docs.quran.foundation/
  */
 
-const API_BASE = 'https://api.quran.com/api/v4';
+// Edge Function proxy — same endpoint paths as the old api.quran.com/api/v4
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const API_BASE = `${SUPABASE_URL}/functions/v1/quran-proxy`;
 
 // Types
 export interface Surah {
@@ -104,7 +107,8 @@ export async function getSurahVersesAll(
 
   const perPage = 50;
   const first = await getSurahVerses(surahNumber, { page: 1, perPage, translations });
-  const total = first.pagination?.total_count || first.verses.length;
+  // API returns `total_records` (not `total_count`)
+  const total = first.pagination?.total_records || first.pagination?.total_count || first.verses.length;
   const totalPages = Math.ceil(total / perPage);
 
   let allVerses = first.verses;
@@ -152,6 +156,7 @@ export interface WordWithLine {
   position: number;
   text_uthmani: string;
   text_uthmani_tajweed?: string; // Tajweed HTML at word level (if returned by API)
+  code_v2?: string;              // QPC Hafs glyph code U+FC41+ — used for both V2 and V4 fonts
   line_number: number;
   page_number: number;
   char_type_name: string; // 'word' | 'end' | 'pause' | 'sajdah' | 'rub_el_hizb'
@@ -171,7 +176,7 @@ export async function getPageWithWords(
 
   const translationsParam = translations.length > 0 ? `&translations=${translations.join(',')}` : '';
   const response = await fetch(
-    `${API_BASE}/verses/by_page/${pageNumber}?language=fr&words=true&word_fields=text_uthmani,text_uthmani_tajweed,line_number,page_number,char_type_name&fields=text_uthmani_tajweed,juz_number,hizb_number,rub_el_hizb_number&text_type=uthmani${translationsParam}`
+    `${API_BASE}/verses/by_page/${pageNumber}?language=fr&words=true&word_fields=text_uthmani,text_uthmani_tajweed,code_v2,line_number,page_number,char_type_name&fields=text_uthmani_tajweed,juz_number,hizb_number,rub_el_hizb_number&text_type=uthmani${translationsParam}`
   );
   const data = await response.json();
 
@@ -188,6 +193,7 @@ export async function getPageWithWords(
         position: word.position,
         text_uthmani: word.text_uthmani || word.text || '',
         text_uthmani_tajweed: word.text_uthmani_tajweed || undefined,
+        code_v2: word.code_v2 || undefined,
         line_number: word.line_number,
         page_number: wordPage,
         char_type_name: word.char_type_name ?? 'word',
@@ -202,6 +208,67 @@ export async function getPageWithWords(
   );
 
   const result = { verses, allWords };
+  cache.set(cacheKey, result);
+  return result;
+}
+
+// ─── Audio ──────────────────────────────────────────────────────────────────
+
+const AUDIO_CDN = 'https://audio.qurancdn.com';
+
+export interface VerseAudioFile {
+  verse_key: string;
+  url: string; // absolute URL
+}
+
+export interface ChapterAudio {
+  audio_url: string;
+  timestamps: {
+    verse_key: string;
+    timestamp_from: number; // ms
+    timestamp_to: number;   // ms
+  }[];
+}
+
+/** Verse-level audio files for an entire surah (one URL per verse). */
+export async function getSurahVerseAudioFiles(
+  reciterId: number,
+  surahNumber: number
+): Promise<VerseAudioFile[]> {
+  const cacheKey = `verse-audio-${reciterId}-${surahNumber}`;
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+  const response = await fetch(`${API_BASE}/recitations/${reciterId}/by_chapter/${surahNumber}`);
+  const data = await response.json();
+  const files: VerseAudioFile[] = (data.audio_files || []).map((f: any) => ({
+    verse_key: f.verse_key,
+    url: `${AUDIO_CDN}/${f.url}`,
+  }));
+  cache.set(cacheKey, files);
+  return files;
+}
+
+/** Full-chapter audio MP3 with per-verse timestamps for live highlighting. */
+export async function getChapterAudio(
+  reciterId: number,
+  surahNumber: number
+): Promise<ChapterAudio | null> {
+  const cacheKey = `chapter-audio-${reciterId}-${surahNumber}`;
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+  const response = await fetch(`${API_BASE}/chapter_recitations/${reciterId}/${surahNumber}?segments=true`);
+  const data = await response.json();
+  const af = data.audio_file;
+  if (!af) return null;
+
+  const result: ChapterAudio = {
+    audio_url: af.audio_url,
+    timestamps: (af.timestamps || []).map((t: any) => ({
+      verse_key: t.verse_key,
+      timestamp_from: t.timestamp_from,
+      timestamp_to: t.timestamp_to,
+    })),
+  };
   cache.set(cacheKey, result);
   return result;
 }
@@ -311,16 +378,10 @@ export async function getTranslations(language: string = 'fr'): Promise<any[]> {
   return data.translations;
 }
 
-/**
- * Récupère l'URL audio d'un verset
- */
-export function getVerseAudioUrl(verseKey: string, reciterId: number = 7): string {
-  // Reciter 7 = Mishary Rashid Alafasy (populaire)
-  // Format: https://verses.quran.com/Alafasy/mp3/001001.mp3
+// Kept for potential fallback use — prefer getSurahVerseAudioFiles for proper reciter support
+export function getVerseAudioUrl(verseKey: string): string {
   const [surah, verse] = verseKey.split(':');
-  const paddedSurah = surah.padStart(3, '0');
-  const paddedVerse = verse.padStart(3, '0');
-  return `https://verses.quran.com/Alafasy/mp3/${paddedSurah}${paddedVerse}.mp3`;
+  return `${AUDIO_CDN}/Alafasy/mp3/${surah.padStart(3,'0')}${verse.padStart(3,'0')}.mp3`;
 }
 
 /**

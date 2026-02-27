@@ -4,26 +4,24 @@ import { useAppStore } from './stores/useAppStore';
 import { useAuth } from './stores/useAuth';
 import Layout from './components/Layout';
 import Login from './components/Login';
-import Dashboard from './components/Dashboard';
 import ToastContainer from './components/ToastContainer';
 import ErrorBoundary from './components/ErrorBoundary';
 
 // Lazy load components for better performance
+const AccueilPage = React.lazy(() => import('./pages/AccueilPage'));
 const ParticipantsPage = React.lazy(() => import('./pages/ParticipantsPage'));
-const EntryPage = React.lazy(() => import('./pages/EntryPage'));
-const MonthlyEntriesPage = React.lazy(() => import('./pages/MonthlyEntriesPage'));
 const AnalyticsPage = React.lazy(() => import('./pages/AnalyticsPage'));
 const SettingsPage = React.lazy(() => import('./pages/SettingsPage'));
 const GroupsPage = React.lazy(() => import('./pages/GroupsPage'));
-const PersonalEntryPage = React.lazy(() => import('./pages/PersonalEntryPage'));
+const ProfilPage = React.lazy(() => import('./pages/ProfilPage'));
 const GroupSettingsPage = React.lazy(() => import('./pages/GroupSettingsPage'));
 const JoinGroupPage = React.lazy(() => import('./pages/JoinGroupPage'));
 const ForgotPasswordPage = React.lazy(() => import('./pages/ForgotPasswordPage'));
 const ResetPasswordPage = React.lazy(() => import('./pages/ResetPasswordPage'));
 const QuranReaderPage = React.lazy(() => import('./pages/QuranReaderPage'));
-const RamadanPage = React.lazy(() => import('./pages/RamadanPage'));
 const PrivacyPolicyPage = React.lazy(() => import('./pages/PrivacyPolicyPage'));
 const TermsPage = React.lazy(() => import('./pages/TermsPage'));
+const LinkAccountPage = React.lazy(() => import('./pages/LinkAccountPage'));
 
 function App() {
   const { isAuthenticated, user, enableGroups, fetchMyGroups, checkEmailVerification } = useAppStore();
@@ -104,6 +102,14 @@ function App() {
                   </React.Suspense>
                 }
               />
+              <Route
+                path="link-account"
+                element={
+                  <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                    <LinkAccountPage />
+                  </React.Suspense>
+                }
+              />
               <Route path="*" element={<Login />} />
             </Routes>
           </div>
@@ -127,114 +133,82 @@ function App() {
                 </React.Suspense>
               }
             />
+            {/* Quran — full-screen, outside Layout (no padding, no sidebar, no bottom tabs) */}
+            <Route path="/quran" element={
+              <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                <QuranReaderPage />
+              </React.Suspense>
+            } />
+
             <Route path="/" element={<Layout />}>
-              <Route index element={<Dashboard />} />
-            <Route
-              path="groups"
-              element={
+              {/* Main tab routes */}
+              <Route index element={
                 <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
-                  <GroupsPage />
+                  <AccueilPage />
                 </React.Suspense>
-              }
-            />
-            <Route
-              path="participants"
-              element={
-                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
-                  <ParticipantsPage />
-                </React.Suspense>
-              }
-            />
-            <Route
-              path="entry"
-              element={
-                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
-                  <EntryPage />
-                </React.Suspense>
-              }
-            />
-            <Route
-              path="me/entry"
-              element={
-                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
-                  <PersonalEntryPage />
-                </React.Suspense>
-              }
-            />
-            <Route
-              path="monthly"
-              element={
-                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
-                  <MonthlyEntriesPage />
-                </React.Suspense>
-              }
-            />
-            <Route
-              path="analytics"
-              element={
+              } />
+              <Route path="analytics" element={
                 <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
                   <AnalyticsPage />
                 </React.Suspense>
-              }
-            />
-            <Route
-              path="settings"
-              element={
+              } />
+              <Route path="groups" element={
+                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                  <GroupsPage />
+                </React.Suspense>
+              } />
+              <Route path="profil" element={
+                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                  <ProfilPage />
+                </React.Suspense>
+              } />
+
+              {/* Sub-pages accessible from tabs */}
+              <Route path="participants" element={
+                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                  <ParticipantsPage />
+                </React.Suspense>
+              } />
+              <Route path="settings" element={
                 <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
                   <SettingsPage />
                 </React.Suspense>
-              }
-            />
-            <Route
-              path="group-settings"
-              element={
+              } />
+              <Route path="group-settings" element={
                 <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
                   <GroupSettingsPage />
                 </React.Suspense>
-              }
-            />
-            <Route
-              path="join"
-              element={
+              } />
+              <Route path="join" element={
                 <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
                   <JoinGroupPage />
                 </React.Suspense>
-              }
-            />
-            <Route
-              path="quran"
-              element={
-                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
-                  <QuranReaderPage />
-                </React.Suspense>
-              }
-            />
-            <Route
-              path="ramadan"
-              element={
-                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
-                  <RamadanPage />
-                </React.Suspense>
-              }
-            />
-            <Route
-              path="privacy"
-              element={
+              } />
+              <Route path="privacy" element={
                 <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
                   <PrivacyPolicyPage />
                 </React.Suspense>
-              }
-            />
-            <Route
-              path="terms"
-              element={
+              } />
+              <Route path="terms" element={
                 <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
                   <TermsPage />
                 </React.Suspense>
-              }
-            />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
+              } />
+
+              <Route path="link-account" element={
+                <React.Suspense fallback={<div className="flex justify-center p-8">Chargement...</div>}>
+                  <LinkAccountPage />
+                </React.Suspense>
+              } />
+
+              {/* Legacy routes → redirect to Accueil (content now embedded as views) */}
+              <Route path="entry"    element={<Navigate to="/" replace />} />
+              <Route path="monthly"  element={<Navigate to="/" replace />} />
+              <Route path="me/entry" element={<Navigate to="/" replace />} />
+              <Route path="ramadan"  element={<Navigate to="/" replace />} />
+
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
           </Routes>
         </div>
       </Router>

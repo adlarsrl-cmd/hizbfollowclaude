@@ -15,30 +15,32 @@ import {
   Bookmark,
   Share2,
   Play,
+  Pause,
   Save,
   LogIn,
-  ChevronDown
+  Music,
 } from 'lucide-react';
 import {
   getSurahs,
   getPageWithWords,
   getSurahVersesAll,
-  getHizbVerses,
+  getSurahVerseAudioFiles,
+  getChapterAudio,
   type Surah,
   type VerseWithTranslation,
   type WordWithLine,
   TOTAL_PAGES,
-  TOTAL_HIZB
 } from '../lib/quranApi';
 import { supabase } from '../lib/supabase';
 import { useAppStore } from '../stores/useAppStore';
 import { useToast } from '../stores/useToast';
 import { getDayBounds } from '../lib/utils';
+import BottomTabBar from '../components/BottomTabBar';
 
-type ViewMode = 'page' | 'surah' | 'hizb';
+type ViewMode = 'page' | 'surah';
 type LanguageMode = 'arabic' | 'french' | 'both';
 type FontSize = 'small' | 'medium' | 'large' | 'xlarge';
-type FontFamily = 'amiri' | 'noto';
+type FontFamily = 'scheherazade' | 'amiri' | 'noto' | 'v2' | 'v4';
 
 // Styles CSS pour le Tajweed - basé sur quran.com
 const tajweedStyles = `
@@ -56,9 +58,14 @@ const tajweedStyles = `
     from { opacity: 0; }
     to   { opacity: 1; }
   }
-  .drawer-slide-left  { animation: slideInLeft  0.28s ease-out; }
-  .drawer-slide-right { animation: slideInRight 0.28s ease-out; }
+  @keyframes overlaySlideDown {
+    from { transform: translateY(-100%); opacity: 0; }
+    to   { transform: translateY(0);     opacity: 1; }
+  }
+  .drawer-slide-left  { animation: slideInLeft    0.28s ease-out; }
+  .drawer-slide-right { animation: slideInRight   0.28s ease-out; }
   .drawer-backdrop    { animation: fadeInBackdrop 0.28s ease-out; }
+  .overlay-slide-down { animation: overlaySlideDown 0.22s cubic-bezier(0.22, 1, 0.36, 1); }
 
   .quran-container {
     background: linear-gradient(180deg, #1a1f2e 0%, #0d1117 100%);
@@ -74,6 +81,14 @@ const tajweedStyles = `
     letter-spacing: 0;
   }
   
+  /* Scheherazade New — traditional Mushaf Naskh */
+  .tajweed-text.font-scheherazade {
+    font-family: 'Scheherazade New', serif;
+  }
+  .bismillah-text.font-scheherazade {
+    font-family: 'Scheherazade New', serif;
+  }
+
   /* Noto Naskh Arabic font variant */
   .tajweed-text.font-noto {
     font-family: 'Noto Naskh Arabic', serif;
@@ -185,45 +200,44 @@ const tajweedStyles = `
   }
   
   /* ===== VERSE NUMBER ORNAMENT ===== */
-  .verse-number {
+  /* ===== SHARED — ayah rosette (۝) and number on top ===== */
+  .qv-r {
+    position: absolute;
+    font-family: 'Scheherazade New', 'Amiri Quran', serif;
+    color: rgba(192, 144, 32, 0.95);
+    line-height: 1;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    user-select: none;
+  }
+  .qv-n {
     position: relative;
+    z-index: 1;
+    font-family: 'Scheherazade New', 'Amiri Quran', serif;
+    font-weight: bold;
+    line-height: 1;
+    color: #e8d5a0;
+  }
+  .quran-light .qv-r { color: rgba(130, 88, 10, 0.92); }
+  .quran-light .qv-n { color: #3a2200; }
+
+  /* ===== VERSE NUMBER — surah / hizb mode ===== */
+  .verse-number {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 44px;
-    height: 44px;
-    /* Push down to align with the center of the first text line.
-       line-height: 2.8 creates ~0.9em of space above the first glyph.
-       offset = (leading_above - half_frame_height) ≈ 14px for typical sizes */
+    width: 48px;
+    height: 48px;
     margin-top: 14px;
     margin-left: 6px;
     margin-right: 6px;
-    font-family: 'Amiri Quran', serif;
-    font-size: 13px;
-    color: #e8d5a0;
-    font-weight: bold;
-    line-height: 1;
-    z-index: 0;
+    position: relative;
+    flex-shrink: 0;
   }
-
-  .verse-number::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    border: 1px solid rgba(220, 180, 80, 0.7);
-    background: radial-gradient(circle, rgba(180,130,30,0.18) 0%, rgba(180,130,30,0.04) 100%);
-    z-index: -1;
-  }
-
-  .quran-light .verse-number {
-    color: #3a2800;
-  }
-
-  .quran-light .verse-number::before {
-    border-color: rgba(120, 80, 10, 0.5);
-    background: radial-gradient(circle, rgba(200,160,40,0.15) 0%, rgba(200,160,40,0.03) 100%);
-  }
+  .verse-number .qv-r { font-size: 46px; }
+  .verse-number .qv-n { font-size: 13px; }
   
   @media (max-width: 640px) {
     .tajweed-text {
@@ -232,53 +246,35 @@ const tajweedStyles = `
     }
   }
 
-  /* ===== MUSHAF PAGE — inline verse number ===== */
+  /* ===== MUSHAF PAGE — inline verse number (scales with em) ===== */
   .verse-number-inline {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 30px;
-    height: 30px;
-    margin: 0 3px;
-    font-family: 'Amiri Quran', serif;
-    font-size: 11px;
-    color: #e8d5a0;
-    font-weight: bold;
-    line-height: 1;
+    width: 2em;
+    height: 2em;
+    margin: 0 0.08em;
     vertical-align: middle;
     position: relative;
-    z-index: 0;
   }
-  .verse-number-inline::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    border: 1px solid rgba(220, 180, 80, 0.7);
-    background: radial-gradient(circle, rgba(180,130,30,0.18) 0%, rgba(180,130,30,0.04) 100%);
-    z-index: -1;
-  }
-  .quran-light .verse-number-inline {
-    color: #3a2800;
-  }
-  .quran-light .verse-number-inline::before {
-    border-color: rgba(120, 80, 10, 0.5);
-    background: radial-gradient(circle, rgba(200,160,40,0.15) 0%, rgba(200,160,40,0.03) 100%);
-  }
+  .verse-number-inline .qv-r { font-size: 2em; }
+  .verse-number-inline .qv-n { font-size: 0.54em; }
 
   /* ===== MUSHAF PAGE — surah header box ===== */
   .surah-header-box {
     display: inline-flex;
     align-items: center;
-    gap: 12px;
-    padding: 8px 28px;
-    border-radius: 9999px;
-    border: 1px solid rgba(180,130,30,0.35);
-    background: rgba(180,130,30,0.08);
+    gap: 10px;
+    padding: 4px 18px;
+    border: 1.5px solid rgba(180,130,30,0.5);
+    outline: 0.75px solid rgba(180,130,30,0.2);
+    outline-offset: 4px;
+    background: rgba(180,130,30,0.06);
   }
   .quran-light .surah-header-box {
-    border-color: rgba(160,110,20,0.3);
-    background: rgba(255,248,220,0.8);
+    border-color: rgba(140,100,20,0.5);
+    outline-color: rgba(140,100,20,0.2);
+    background: rgba(255,248,215,0.7);
   }
 
   /* ===== MUSHAF LINE LAYOUT ===== */
@@ -337,10 +333,10 @@ const tajweedStyles = `
   }
   /* Verse ornament scales with mushafAutoFontSize in no-scroll mode */
   .mushaf-no-scroll .verse-number-inline {
-    font-size: 0.65em;
-    width: 2.4em;
-    height: 2.4em;
-    margin: 0 0.15em;
+    font-size: 0.7em;
+    width: 2em;
+    height: 2em;
+    margin: 0 0.06em;
   }
 
   /* ===== VERSE INTERACTIONS ===== */
@@ -410,6 +406,13 @@ const tajweedStyles = `
   }
   .quran-light .bismillah-text {
     text-shadow: none;
+  }
+
+  /* ===== AUDIO VERSE HIGHLIGHT ===== */
+  .verse-clickable.audio-playing {
+    background: rgba(57, 181, 120, 0.10);
+    border-color: rgba(57, 181, 120, 0.40);
+    box-shadow: 0 0 0 1px rgba(57, 181, 120, 0.20);
   }
 `;
 
@@ -845,10 +848,19 @@ export default function QuranReaderPage() {
   const [totalVersePages, setTotalVersePages] = useState(1);
   
   // Navigation
-  const [viewMode, setViewMode] = useState<ViewMode>('surah');
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    try {
+      const saved = localStorage.getItem('quran-last-saved-position');
+      if (saved) {
+        const pos = JSON.parse(saved);
+        if (pos.view_mode === 'page' || pos.view_mode === 'surah') return pos.view_mode as ViewMode;
+      }
+    } catch {}
+    const vm = localStorage.getItem('quran-view-mode') as ViewMode;
+    return (vm === 'page' || vm === 'surah') ? vm : 'surah';
+  });
   const [currentPage, setCurrentPage] = useState(1);
   const [currentSurah, setCurrentSurah] = useState(1);
-  const [currentHizb, setCurrentHizb] = useState(1);
   
   // UI Settings
   const [languageMode, setLanguageMode] = useState<LanguageMode>('both');
@@ -856,15 +868,35 @@ export default function QuranReaderPage() {
     () => (localStorage.getItem('quran-font-size') as FontSize) || 'large'
   );
   const [fontFamily, setFontFamily] = useState<FontFamily>(
-    () => (localStorage.getItem('quran-font-family') as FontFamily) || 'amiri'
+    () => (localStorage.getItem('quran-font-family') as FontFamily) || 'scheherazade'
   );
   const [showSurahList, setShowSurahList] = useState(false);
   const [surahSearch, setSurahSearch] = useState('');
-  const [surahDrawerTab, setSurahDrawerTab] = useState<'surah' | 'hizb'>('surah');
   const [showSettings, setShowSettings] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(false);
   
   // Page mode word-level data (for exact mushaf line layout)
   const [pageWords, setPageWords] = useState<WordWithLine[]>([]);
+  // QPC glyph font readiness (shared for v2 and v4)
+  const [glyphFontReady, setGlyphFontReady] = useState(false);
+
+  // Translation: 136 = Montada (default), 31 = Hamidullah
+  const [selectedTranslationId, setSelectedTranslationId] = useState<number>(
+    () => parseInt(localStorage.getItem('quran-translation-id') || '136', 10)
+  );
+
+  // Audio player
+  const [audioVerseKey, setAudioVerseKey] = useState<string | null>(null);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const [audioReciterId, setAudioReciterId] = useState<number>(
+    () => parseInt(localStorage.getItem('quran-reciter-id') || '7', 10)
+  );
+  const [audioMode, setAudioMode] = useState<'verse' | 'surah'>('verse');
+  const [audioTimestamps, setAudioTimestamps] = useState<{verse_key: string; timestamp_from: number; timestamp_to: number}[]>([]);
+  const [audioVerseUrls, setAudioVerseUrls] = useState<Map<string, string>>(new Map());
+  const [audioProgress, setAudioProgress] = useState(0);
+  const [audioLoadingKey, setAudioLoadingKey] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Verse interaction
   const [selectedVerse, setSelectedVerse] = useState<VerseWithTranslation | null>(null);
@@ -873,17 +905,23 @@ export default function QuranReaderPage() {
   const [savingProgress, setSavingProgress] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [lastSavedVerseKey, setLastSavedVerseKey] = useState<string | null>(null);
-  const [showViewModeDropdown, setShowViewModeDropdown] = useState(false);
-  
   const verseMenuRef = useRef<HTMLDivElement>(null);
   const savedVerseRef = useRef<HTMLDivElement>(null);
-  const viewModeDropdownRef = useRef<HTMLDivElement>(null);
+  const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressActivatedRef = useRef(false);
 
   // Mushaf no-scroll: auto font size
-  const headerRef = useRef<HTMLDivElement>(null);
   const bottomNavRef = useRef<HTMLDivElement>(null);
   const mushafNoScrollRef = useRef<HTMLDivElement>(null);
   const [mushafAutoFontSize, setMushafAutoFontSize] = useState(18);
+
+  // Font family → CSS class (v4 has no class — handled separately via inline style)
+  const fontFamilyClass = (f: FontFamily): string => {
+    if (f === 'scheherazade') return 'font-scheherazade';
+    if (f === 'noto') return 'font-noto';
+    return ''; // 'amiri' and 'v4' — base CSS or inline style
+  };
 
   // Font sizes mapping — smaller baseline on mobile
   const fontSizes: Record<FontSize, string> = {
@@ -898,15 +936,22 @@ export default function QuranReaderPage() {
     localStorage.setItem('quran-font-family', fontFamily);
   }, [fontFamily]);
 
-  // Close verse menu and dropdown when clicking outside
+  // Persist view mode preference
+  useEffect(() => {
+    localStorage.setItem('quran-view-mode', viewMode);
+  }, [viewMode]);
+
+  // Persist translation selection
+  useEffect(() => {
+    localStorage.setItem('quran-translation-id', String(selectedTranslationId));
+  }, [selectedTranslationId]);
+
+  // Close verse menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (verseMenuRef.current && !verseMenuRef.current.contains(event.target as Node)) {
         setShowVerseMenu(false);
         setSelectedVerse(null);
-      }
-      if (viewModeDropdownRef.current && !viewModeDropdownRef.current.contains(event.target as Node)) {
-        setShowViewModeDropdown(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -931,10 +976,11 @@ export default function QuranReaderPage() {
       try {
         const position = JSON.parse(saved);
         setLastSavedVerseKey(position.verse_key);
-        setCurrentHizb(position.hizb_number);
         setCurrentPage(position.page_number);
         setCurrentSurah(position.surah_number);
-        setViewMode(position.view_mode);
+        // Migrate old 'hizb' view_mode to 'surah' (hizb mode removed)
+        const vm: ViewMode = position.view_mode === 'hizb' ? 'page' : (position.view_mode || 'page');
+        setViewMode(vm);
       } catch (e) {
         console.error('Error loading saved position:', e);
       }
@@ -951,17 +997,13 @@ export default function QuranReaderPage() {
         let data: VerseWithTranslation[] = [];
 
         if (viewMode === 'page') {
-          const result = await getPageWithWords(currentPage);
+          const result = await getPageWithWords(currentPage, [selectedTranslationId]);
           data = result.verses;
           setPageWords(result.allWords);
           setTotalVersePages(1);
           setCurrentVersePage(1);
         } else if (viewMode === 'surah') {
-          data = await getSurahVersesAll(currentSurah);
-          setTotalVersePages(1);
-          setCurrentVersePage(1);
-        } else if (viewMode === 'hizb') {
-          data = await getHizbVerses(currentHizb);
+          data = await getSurahVersesAll(currentSurah, [selectedTranslationId]);
           setTotalVersePages(1);
           setCurrentVersePage(1);
         }
@@ -985,7 +1027,7 @@ export default function QuranReaderPage() {
     };
 
     loadVerses();
-  }, [viewMode, currentPage, currentSurah, currentHizb, currentVersePage]);
+  }, [viewMode, currentPage, currentSurah, currentVersePage, selectedTranslationId]);
 
 
 
@@ -1004,9 +1046,8 @@ export default function QuranReaderPage() {
   const readingProgress = useMemo(() => {
     if (viewMode === 'surah') return Math.round((currentSurah / 114) * 100);
     if (viewMode === 'page') return Math.round((currentPage / TOTAL_PAGES) * 100);
-    if (viewMode === 'hizb') return Math.round((currentHizb / TOTAL_HIZB) * 100);
     return 0;
-  }, [viewMode, currentSurah, currentPage, currentHizb]);
+  }, [viewMode, currentSurah, currentPage]);
 
   // Current surah info
   const currentSurahInfo = useMemo(() => {
@@ -1034,7 +1075,7 @@ export default function QuranReaderPage() {
   }, [verses, surahs, viewMode]);
 
   // Exact mushaf line layout: words grouped by line_number with tajweed applied per word
-  interface MushafRenderItem { html: string; verseKey: string; charType: string; }
+  interface MushafRenderItem { html: string; codeV2: string; verseKey: string; charType: string; }
   interface MushafRenderLine {
     lineNum: number;
     items: MushafRenderItem[];
@@ -1070,15 +1111,18 @@ export default function QuranReaderPage() {
 
       let itemHtml: string;
 
+      let codeV2 = '';
       if (word.char_type_name === 'end') {
-        // Verse-end ornament with Western numerals (1, 2, 3...)
+        // Verse-end ornament with Arabic-Indic numerals (١٢٣...)
         const verseNum = parseInt(word.verse_key.split(':')[1]);
-        itemHtml = `<span class="verse-number-inline">${verseNum}</span>`;
+        itemHtml = `<span class="verse-number-inline"><span class="qv-r">&#x06DD;</span><span class="qv-n">${toArabicNumerals(verseNum)}</span></span>`;
+        codeV2 = itemHtml; // ornament is the same in glyph mode
       } else if (word.text_uthmani_tajweed) {
         // PRIMARY: word-level tajweed from API. The API returns <rule class=...> tags
         // at the word level, while the verse level uses <tajweed class=...>.
         // processWordTajweed normalizes <rule> → <tajweed> then applies full processing.
         itemHtml = processWordTajweed(word.text_uthmani_tajweed);
+        codeV2 = word.code_v2 || processTajweedHtml(word.text_uthmani);
       } else {
         // FALLBACK: verse-level tajweed split by position.
         // word.position is 1-indexed within the verse (absolute, works cross-page).
@@ -1087,9 +1131,10 @@ export default function QuranReaderPage() {
         itemHtml = (idx >= 0 && idx < chunks.length)
           ? chunks[idx]
           : processTajweedHtml(word.text_uthmani);
+        codeV2 = word.code_v2 || itemHtml;
       }
 
-      lineItems.get(lineNum)!.push({ html: itemHtml, verseKey: word.verse_key, charType: word.char_type_name });
+      lineItems.get(lineNum)!.push({ html: itemHtml, codeV2, verseKey: word.verse_key, charType: word.char_type_name });
     }
 
     const sortedLineNums = [...lineItems.keys()].sort((a, b) => a - b);
@@ -1130,7 +1175,10 @@ export default function QuranReaderPage() {
       // in the viewport — this accounts for the header height, any margins/padding,
       // progress bar, etc. without needing to measure each element separately.
       const containerTop = el.getBoundingClientRect().top;
-      const navH = bottomNavRef.current?.offsetHeight ?? 64;
+      // BottomTabBar is position:fixed — its wrapper div has height 0 in normal flow.
+      // Query the fixed <nav> directly to get its true visual height (includes safe-area-inset-bottom).
+      const navEl = (bottomNavRef.current?.querySelector('nav') ?? document.querySelector('nav.fixed.bottom-0')) as HTMLElement | null;
+      const navH = navEl?.offsetHeight ?? 64;
       const availH = window.innerHeight - containerTop - navH;
       if (availH <= 0) return;
       el.style.height = `${availH}px`;
@@ -1147,21 +1195,60 @@ export default function QuranReaderPage() {
       // availH includes the page-info strip (~30px, flex-shrink:0).
       // Subtract it so the last line doesn't overflow the container.
       const pageInfoH = pageInfo ? 30 : 0;
-      const computed = Math.floor((availH - pageInfoH) / totalFlex / 2.2);
+      // Scheherazade New and Amiri Quran have wider glyphs — use a larger divisor
+      // so the computed font size is smaller and lines don't overflow horizontally.
+      const lhDivisor = (!glyphFontReady && (fontFamily === 'scheherazade' || fontFamily === 'amiri')) ? 2.65 : 2.2;
+      const computed = Math.floor((availH - pageInfoH) / totalFlex / lhDivisor);
       setMushafAutoFontSize(Math.min(computed, 30));
     };
     compute();
-    // Observe the header (not the container itself, to avoid resize loops).
     // Window resize covers viewport size changes (rotation, browser chrome show/hide).
     const ro = new ResizeObserver(compute);
-    if (headerRef.current) ro.observe(headerRef.current);
     if (bottomNavRef.current) ro.observe(bottomNavRef.current);
     window.addEventListener('resize', compute);
     return () => {
       ro.disconnect();
       window.removeEventListener('resize', compute);
     };
-  }, [viewMode, mushafLines.length, pageInfo]);
+  }, [viewMode, mushafLines.length, pageInfo, glyphFontReady, fontFamily]);
+
+  // QPC V2/V4 — unified glyph font loading (per-page, from verses.quran.foundation CDN)
+  useEffect(() => {
+    if (viewMode !== 'page' || (fontFamily !== 'v2' && fontFamily !== 'v4')) {
+      setGlyphFontReady(false);
+      return;
+    }
+    let cancelled = false;
+    setGlyphFontReady(false);
+
+    const version = fontFamily; // 'v2' or 'v4'
+    const loadFont = async (page: number): Promise<void> => {
+      const name = `p${page}-${version}`;
+      if (document.fonts.check(`12px "${name}"`)) return;
+      let src: string;
+      if (version === 'v4') {
+        src = `url('https://verses.quran.foundation/fonts/quran/hafs/v4/colrv1/woff2/p${page}.woff2') format('woff2'),` +
+              `url('https://verses.quran.foundation/fonts/quran/hafs/v4/colrv1/woff/p${page}.woff') format('woff')`;
+      } else {
+        src = `url('https://verses.quran.foundation/fonts/quran/hafs/v2/woff2/p${page}.woff2') format('woff2'),` +
+              `url('https://verses.quran.foundation/fonts/quran/hafs/v2/woff/p${page}.woff') format('woff')`;
+      }
+      const face = new FontFace(name, src, { display: 'block' });
+      document.fonts.add(face);
+      await face.load();
+    };
+
+    loadFont(currentPage)
+      .then(() => { if (!cancelled) setGlyphFontReady(true); })
+      .catch(err => console.warn('[QPC font] load failed:', err));
+
+    // Preload adjacent pages silently
+    for (const adj of [currentPage - 1, currentPage + 1]) {
+      if (adj >= 1 && adj <= 604) loadFont(adj).catch(() => {});
+    }
+
+    return () => { cancelled = true; };
+  }, [viewMode, currentPage, fontFamily]);
 
   // Keyboard navigation (arrow keys) — ← next, → prev (RTL convention)
   useEffect(() => {
@@ -1172,7 +1259,7 @@ export default function QuranReaderPage() {
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [viewMode, currentPage, currentSurah, currentHizb]);
+  }, [viewMode, currentPage, currentSurah]);
 
   // Scroll to top on content change
   const scrollToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1184,8 +1271,6 @@ export default function QuranReaderPage() {
     } else if (viewMode === 'surah') {
       setCurrentSurah(prev => Math.min(prev + 1, 114));
       setCurrentVersePage(1);
-    } else if (viewMode === 'hizb') {
-      setCurrentHizb(prev => Math.min(prev + 1, TOTAL_HIZB));
     }
     scrollToTop();
   };
@@ -1196,8 +1281,6 @@ export default function QuranReaderPage() {
     } else if (viewMode === 'surah') {
       setCurrentSurah(prev => Math.max(prev - 1, 1));
       setCurrentVersePage(1);
-    } else if (viewMode === 'hizb') {
-      setCurrentHizb(prev => Math.max(prev - 1, 1));
     }
     scrollToTop();
   };
@@ -1211,10 +1294,11 @@ export default function QuranReaderPage() {
     if (touchStartX === null || touchStartY === null) return;
     const dx = touchStartX - e.changedTouches[0].clientX;
     const dy = Math.abs(touchStartY - e.changedTouches[0].clientY);
-    // Only trigger if horizontal swipe > 60px and not a vertical scroll
-    if (Math.abs(dx) > 60 && dy < 40) {
-      if (dx > 0) goToNext();
-      else goToPrev();
+    const absDx = Math.abs(dx);
+    // Swipe navigation — RTL: swipe right (dx < 0) = next page, swipe left (dx > 0) = prev page
+    if (absDx > 60 && dy < 40) {
+      if (dx < 0) goToNext(); // finger moved right → next (RTL convention)
+      else goToPrev();        // finger moved left  → prev
     }
     setTouchStartX(null);
     setTouchStartY(null);
@@ -1226,9 +1310,7 @@ export default function QuranReaderPage() {
     if (saved) {
       try {
         const position = JSON.parse(saved);
-        if (mode === 'hizb' && position.hizb_number) {
-          setCurrentHizb(position.hizb_number);
-        } else if (mode === 'page' && position.page_number) {
+        if (mode === 'page' && position.page_number) {
           setCurrentPage(position.page_number);
         } else if (mode === 'surah' && position.surah_number) {
           setCurrentSurah(position.surah_number);
@@ -1247,23 +1329,136 @@ export default function QuranReaderPage() {
   };
 
   const selectSurah = (id: number) => {
-    setCurrentSurah(id);
-    setCurrentVersePage(1);
-    setViewMode('surah');
+    if (viewMode === 'page') {
+      const surah = surahs.find(s => s.id === id);
+      if (surah?.pages?.[0]) setCurrentPage(surah.pages[0]);
+    } else {
+      setCurrentSurah(id);
+      setCurrentVersePage(1);
+    }
     setShowSurahList(false);
   };
 
-  const handleVerseClick = (verse: VerseWithTranslation, event: React.MouseEvent) => {
-    event.preventDefault();
-    setSelectedVerse(verse);
-    setShowVerseMenu(true);
-    
-    const rect = (event.target as HTMLElement).getBoundingClientRect();
-    setVerseMenuPosition({
-      x: Math.min(rect.left, window.innerWidth - 250),
-      y: rect.bottom + 10
-    });
+  // ── Audio helpers ─────────────────────────────────────────────────────────
+
+  const getAudio = (): HTMLAudioElement => {
+    if (!audioRef.current) audioRef.current = new Audio();
+    return audioRef.current;
   };
+
+  const stopAudio = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+    }
+    setAudioPlaying(false);
+    setAudioVerseKey(null);
+    setAudioTimestamps([]);
+    setAudioVerseUrls(new Map());
+    setAudioProgress(0);
+    setAudioLoadingKey(null);
+  };
+
+  const playVerse = async (verseKey: string) => {
+    const surahNum = parseInt(verseKey.split(':')[0]);
+    setAudioLoadingKey(verseKey);
+    try {
+      const files = await getSurahVerseAudioFiles(audioReciterId, surahNum);
+      const urlMap = new Map(files.map(f => [f.verse_key, f.url]));
+      setAudioVerseUrls(urlMap);
+      const url = urlMap.get(verseKey);
+      if (!url) return;
+      const el = getAudio();
+      el.src = url;
+      await el.play();
+      setAudioVerseKey(verseKey);
+      setAudioMode('verse');
+      setAudioPlaying(true);
+      setAudioTimestamps([]);
+    } catch (err) {
+      console.error('[Audio] playVerse error:', err);
+    } finally {
+      setAudioLoadingKey(null);
+    }
+  };
+
+  const playSurah = async () => {
+    const surahNum = viewMode === 'surah'
+      ? currentSurah
+      : parseInt(verses[0]?.verse_key?.split(':')[0] || '1');
+    const key = `surah-${surahNum}`;
+    setAudioLoadingKey(key);
+    try {
+      const audio = await getChapterAudio(audioReciterId, surahNum);
+      if (!audio) return;
+      const el = getAudio();
+      el.src = audio.audio_url;
+      await el.play();
+      setAudioTimestamps(audio.timestamps);
+      setAudioMode('surah');
+      setAudioPlaying(true);
+      setAudioVerseKey(audio.timestamps[0]?.verse_key || null);
+      setAudioVerseUrls(new Map());
+    } catch (err) {
+      console.error('[Audio] playSurah error:', err);
+    } finally {
+      setAudioLoadingKey(null);
+    }
+  };
+
+  // Audio: unmount cleanup
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      }
+    };
+  }, []);
+
+  // Audio: timeupdate — progress bar + surah mode verse key highlight
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    const handleTimeUpdate = () => {
+      if (el.duration) setAudioProgress((el.currentTime / el.duration) * 100);
+      if (audioMode === 'surah' && audioTimestamps.length > 0) {
+        const ms = el.currentTime * 1000;
+        const cur = audioTimestamps.find(t => ms >= t.timestamp_from && ms < t.timestamp_to);
+        if (cur) setAudioVerseKey(cur.verse_key);
+      }
+    };
+    el.addEventListener('timeupdate', handleTimeUpdate);
+    return () => el.removeEventListener('timeupdate', handleTimeUpdate);
+  }, [audioMode, audioTimestamps]);
+
+  // Audio: verse mode auto-advance on ended
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    const handleEnded = () => {
+      setAudioPlaying(false);
+      if (audioMode === 'verse' && audioVerseKey) {
+        const [surahStr, verseStr] = audioVerseKey.split(':');
+        const nextKey = `${surahStr}:${parseInt(verseStr) + 1}`;
+        const nextUrl = audioVerseUrls.get(nextKey);
+        if (nextUrl) {
+          el.src = nextUrl;
+          el.play()
+            .then(() => { setAudioVerseKey(nextKey); setAudioPlaying(true); })
+            .catch(() => {});
+        } else {
+          setAudioVerseKey(null);
+        }
+      } else if (audioMode === 'surah') {
+        setAudioVerseKey(null);
+      }
+    };
+    el.addEventListener('ended', handleEnded);
+    return () => el.removeEventListener('ended', handleEnded);
+  }, [audioMode, audioVerseKey, audioVerseUrls]);
+
+  // ── End audio helpers ──────────────────────────────────────────────────────
 
   const saveReadingProgress = async () => {
     if (!selectedVerse) return;
@@ -1382,131 +1577,77 @@ export default function QuranReaderPage() {
       const surah = surahs.find(s => s.id === currentSurah);
       return surah ? `${surah.name_arabic}` : `Sourate ${currentSurah}`;
     }
-    if (viewMode === 'hizb') return `Hizb ${currentHizb} / ${TOTAL_HIZB}`;
     return '';
   };
 
   const isAuthenticated = !!user;
 
+  // Dynamic CSS injected when QPC V2/V4 glyph font is ready for the current page:
+  // - V4: @font-palette-values selects light (0) or dark (1) tajweed COLRv1 palette
+  // - V2: plain glyphs, no color palette
+  // - .mushaf-glyph .qv-r / .qv-n keep Scheherazade New for the ۝ verse marker
+  const glyphDynamicStyle = glyphFontReady ? `
+  ${fontFamily === 'v4' ? `@font-palette-values --QpcGlyphPalette {
+    font-family: 'p${currentPage}-v4';
+    base-palette: ${isDark ? 1 : 0};
+  }
+  .mushaf-glyph { font-palette: --QpcGlyphPalette; }` : ''}
+  .mushaf-glyph .tajweed-text {
+    font-family: 'p${currentPage}-${fontFamily}' !important;
+    word-spacing: 0.04em;
+    line-height: 2.4 !important;
+  }
+  .mushaf-glyph .qv-r,
+  .mushaf-glyph .qv-n {
+    font-family: 'Scheherazade New', 'Amiri Quran', serif !important;
+  }
+  ` : '';
+
+  const showOverlayWithTimer = () => {
+    if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+    setShowOverlay(true);
+    overlayTimerRef.current = setTimeout(() => setShowOverlay(false), 3500);
+  };
+
+  const resetOverlayTimer = () => {
+    if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+    overlayTimerRef.current = setTimeout(() => setShowOverlay(false), 3500);
+  };
+
   return (
     <>
-      <style>{tajweedStyles}</style>
+      <style>{tajweedStyles + glyphDynamicStyle}</style>
       
       <div
         className={`quran-container min-h-screen ${isDark ? '' : 'quran-light'}`}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
+        onClick={(e) => {
+          // If a long press just opened the verse menu, suppress this click
+          if (longPressActivatedRef.current) {
+            longPressActivatedRef.current = false;
+            return;
+          }
+          // Any tap (including on verse text) toggles the overlay bar
+          const target = e.target as HTMLElement;
+          if (target.closest('button') || target.closest('input') || target.closest('a')) return;
+          if (showOverlay) {
+            if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+            setShowOverlay(false);
+          } else {
+            showOverlayWithTimer();
+          }
+        }}
       >
-        {/* Header */}
-        <div ref={headerRef} className={`sticky top-0 z-30 backdrop-blur-md border-b ${isDark ? 'bg-[#1a1f2e]/95 border-gray-700/50' : 'bg-white/95 border-gray-200/80'}`}>
-          <div className="max-w-5xl mx-auto px-4 py-2">
-            <div className="flex items-center justify-between">
-              {/* Title */}
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <div className="p-1.5 bg-emerald-900/50 rounded-lg border border-emerald-700/30">
-                  <Book className="h-4 w-4 text-emerald-400" />
-                </div>
-                <h1 className={`text-base font-bold font-arabic ${isDark ? 'text-white' : 'text-gray-900'}`}>القرآن الكريم</h1>
-              </div>
+        {/* Safe area spacer (iOS notch/island) */}
+        <div style={{ height: 'env(safe-area-inset-top, 0px)', flexShrink: 0 }} />
 
-              {/* View Mode - Desktop: 3 buttons, Mobile: Dropdown */}
-              <div className={`hidden md:flex items-center gap-1 rounded-xl p-1 border ${isDark ? 'bg-gray-800/50 border-gray-700/50' : 'bg-gray-100/80 border-gray-300/50'}`}>
-                {[
-                  { mode: 'surah' as ViewMode, icon: BookOpen, label: 'Sourate' },
-                  { mode: 'page' as ViewMode, icon: FileText, label: 'Page' },
-                  { mode: 'hizb' as ViewMode, icon: Layers, label: 'Hizb' },
-                ].map(({ mode, icon: Icon, label }) => (
-                  <button
-                    key={mode}
-                    onClick={() => switchViewMode(mode)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                      viewMode === mode
-                        ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50'
-                        : isDark ? 'text-gray-400 hover:text-white hover:bg-gray-700/50' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/70'
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" />
-                    <span className="hidden sm:inline">{label}</span>
-                  </button>
-                ))}
-              </div>
-
-              {/* Mobile View Mode Dropdown */}
-              <div className="md:hidden relative" ref={viewModeDropdownRef}>
-                <button
-                  onClick={() => setShowViewModeDropdown(!showViewModeDropdown)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all border ${isDark ? 'bg-gray-800/50 text-gray-400 hover:text-white hover:bg-gray-700/50 border-gray-700/50' : 'bg-gray-100/80 text-gray-600 hover:text-gray-900 hover:bg-gray-200/70 border-gray-300/50'}`}
-                >
-                  {viewMode === 'surah' && <BookOpen className="h-4 w-4" />}
-                  {viewMode === 'page' && <FileText className="h-4 w-4" />}
-                  {viewMode === 'hizb' && <Layers className="h-4 w-4" />}
-                  <span>
-                    {viewMode === 'surah' ? 'Sourate' : viewMode === 'page' ? 'Page' : 'Hizb'}
-                  </span>
-                  <ChevronDown className={`h-4 w-4 transition-transform ${showViewModeDropdown ? 'rotate-180' : ''}`} />
-                </button>
-                {showViewModeDropdown && (
-                  <div className={`absolute right-0 mt-2 w-32 rounded-lg shadow-lg z-50 border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-                    {[
-                      { mode: 'surah' as ViewMode, label: 'Sourate' },
-                      { mode: 'page' as ViewMode, label: 'Page' },
-                      { mode: 'hizb' as ViewMode, label: 'Hizb' },
-                    ].map(({ mode, label }) => (
-                      <button
-                        key={mode}
-                        onClick={() => {
-                          switchViewMode(mode);
-                          setShowViewModeDropdown(false);
-                        }}
-                        className={`block w-full text-left px-4 py-2 text-sm transition-colors ${
-                          viewMode === mode
-                            ? 'bg-emerald-600 text-white'
-                            : isDark ? 'text-gray-400 hover:bg-gray-700/50 hover:text-white' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center gap-2">
-                {!isAuthenticated && (
-                  <button
-                    onClick={() => navigate('/')}
-                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-colors font-medium text-sm"
-                    title="Se connecter"
-                  >
-                    <LogIn className="h-4 w-4" />
-                    <span className="hidden sm:inline">Se connecter</span>
-                  </button>
-                )}
-                <button
-                  onClick={() => setShowSurahList(true)}
-                  className={`hidden sm:block p-2 rounded-xl transition-colors ${isDark ? 'hover:bg-gray-700/50 text-gray-400 hover:text-white' : 'hover:bg-gray-200/70 text-gray-500 hover:text-gray-900'}`}
-                  title="Liste des sourates"
-                >
-                  <List className="h-5 w-5" />
-                </button>
-                <button
-                  onClick={() => setShowSettings(true)}
-                  className={`hidden sm:block p-2 rounded-xl transition-colors ${isDark ? 'hover:bg-gray-700/50 text-gray-400 hover:text-white' : 'hover:bg-gray-200/70 text-gray-500 hover:text-gray-900'}`}
-                  title="Paramètres"
-                >
-                  <Settings className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
-          </div>
-          {/* Progress bar */}
-          <div className={`h-0.5 w-full ${isDark ? 'bg-gray-800' : 'bg-gray-200'}`}>
-            <div
-              className="h-full bg-emerald-500 transition-all duration-500 ease-out"
-              style={{ width: `${readingProgress}%` }}
-            />
-          </div>
+        {/* Thin progress bar — always visible at top */}
+        <div className={`h-0.5 w-full ${isDark ? 'bg-gray-800/60' : 'bg-gray-300/40'}`}>
+          <div
+            className="h-full bg-emerald-500 transition-all duration-500 ease-out"
+            style={{ width: `${readingProgress}%` }}
+          />
         </div>
 
         {/* ── PAGE MODE — full-height no-scroll mushaf ── */}
@@ -1544,8 +1685,11 @@ export default function QuranReaderPage() {
 
                 {/* Mushaf no-scroll container — lines fill available height */}
                 <div
-                  className={`mushaf-no-scroll flex-1 min-h-0 ${fontFamily === 'noto' ? 'font-noto' : ''}`}
-                  style={{ fontSize: `${mushafAutoFontSize}px` }}
+                  className={`mushaf-no-scroll flex-1 min-h-0 ${glyphFontReady ? 'mushaf-glyph' : fontFamilyClass(fontFamily)}`}
+                  style={{
+                    fontSize: `${mushafAutoFontSize}px`,
+                    fontFamily: glyphFontReady ? `'p${currentPage}-${fontFamily}'` : undefined,
+                  }}
                 >
                   {mushafLines.map((line) => {
                     const si = line.newSurahBefore
@@ -1558,41 +1702,82 @@ export default function QuranReaderPage() {
                       : 1;
                     return (
                       <div key={line.lineNum} className="mushaf-line-group" style={{ flex: flexWeight }}>
-                        {/* Surah header (compact) */}
-                        {line.newSurahBefore && (
-                          <div className="surah-header-compact text-center">
-                            <div className="surah-header-box" style={{ display: 'inline-flex', padding: '2px 14px', gap: '8px' }}>
-                              <span
-                                className={`font-bold ${isDark ? 'text-amber-200' : 'text-amber-900'}`}
-                                style={{ fontFamily: "'Amiri Quran', serif", fontSize: `${mushafAutoFontSize * 0.85}px` }}
-                              >
-                                سُورَة {si?.name_arabic}
-                              </span>
-                              {si?.translated_name?.name && (
-                                <span className={`font-medium ${isDark ? 'text-amber-500' : 'text-amber-700'}`}
-                                  style={{ fontSize: `${mushafAutoFontSize * 0.5}px` }}>
-                                  {si.translated_name.name}
+                        {/* Surah header (compact — page mode) */}
+                        {line.newSurahBefore && (() => {
+                          const gold = isDark ? 'rgba(210,160,40,0.85)' : 'rgba(120,80,10,0.80)';
+                          const goldFade = isDark ? 'rgba(210,160,40,0.15)' : 'rgba(120,80,10,0.12)';
+                          const S = 16; // corner ornament size
+                          const corners = [
+                            { key: 'tl', pos: { top: -S/2, left: -S/2 }, tx: '' },
+                            { key: 'tr', pos: { top: -S/2, right: -S/2 }, tx: `translate(${S},0) scale(-1,1)` },
+                            { key: 'bl', pos: { bottom: -S/2, left: -S/2 }, tx: `translate(0,${S}) scale(1,-1)` },
+                            { key: 'br', pos: { bottom: -S/2, right: -S/2 }, tx: `translate(${S},${S}) scale(-1,-1)` },
+                          ];
+                          return (
+                            <div className="surah-header-compact" style={{ textAlign: 'center', paddingBottom: '2px' }}>
+                              {/* Surah name box with corner ornaments */}
+                              <div className="surah-header-box" style={{ display: 'inline-flex', position: 'relative', padding: '4px 22px', gap: '10px', overflow: 'visible' }}>
+                                {corners.map(({ key, pos, tx }) => (
+                                  <svg key={key} width={S} height={S} viewBox={`0 0 ${S} ${S}`}
+                                    style={{ position: 'absolute', pointerEvents: 'none', ...pos } as React.CSSProperties}
+                                    xmlns="http://www.w3.org/2000/svg">
+                                    <g transform={tx || undefined}>
+                                      <path d={`M ${S} 1.5 Q ${S*0.55} 1.5 ${S*0.3} ${S*0.3} Q 1.5 ${S*0.55} 1.5 ${S}`} stroke={gold} fill="none" strokeWidth="1.3" strokeLinecap="round"/>
+                                      <path d={`M ${S} ${S*0.38} Q ${S*0.7} ${S*0.38} ${S*0.55} ${S*0.55} Q ${S*0.38} ${S*0.7} ${S*0.38} ${S}`} stroke={gold} fill="none" strokeWidth="0.65" strokeLinecap="round" opacity="0.4"/>
+                                      <path d={`M ${S*0.75} 1.5 Q ${S-0.5} ${S*0.31} ${S*0.75} ${S*0.53} Q ${S*0.47} ${S*0.31} ${S*0.75} 1.5 Z`} fill={gold} opacity="0.7"/>
+                                      <path d={`M 1.5 ${S*0.75} Q ${S*0.31} ${S-0.5} ${S*0.53} ${S*0.75} Q ${S*0.31} ${S*0.47} 1.5 ${S*0.75} Z`} fill={gold} opacity="0.7"/>
+                                      <circle cx={S*0.5} cy={S*0.5} r="1.2" fill={gold} opacity="0.55"/>
+                                    </g>
+                                  </svg>
+                                ))}
+                                <span
+                                  className={`font-bold ${isDark ? 'text-amber-200' : 'text-amber-900'} ${fontFamilyClass((fontFamily === 'v4' || fontFamily === 'v2') ? 'scheherazade' : fontFamily)}`}
+                                  style={{ fontSize: `${mushafAutoFontSize * 0.88}px` }}
+                                >
+                                  سُورَةُ {si?.name_arabic}
                                 </span>
+                                {si?.translated_name?.name && (
+                                  <span className={`font-medium ${isDark ? 'text-amber-500/70' : 'text-amber-700/70'}`}
+                                    style={{ fontSize: `${mushafAutoFontSize * 0.46}px`, alignSelf: 'center' }}>
+                                    {si.translated_name.name}
+                                  </span>
+                                )}
+                              </div>
+                              {/* Divider below box */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '5px', marginBottom: line.newSurahBefore.hasBismillah ? '1px' : '0' }}>
+                                <div style={{ flex: 1, height: '1px', background: `linear-gradient(90deg, transparent, ${gold}, transparent)` }} />
+                              </div>
+                              {line.newSurahBefore.hasBismillah && (
+                                <div className={`bismillah-text ${fontFamilyClass((fontFamily === 'v4' || fontFamily === 'v2') ? 'scheherazade' : fontFamily)}`}
+                                  style={{ fontSize: `${mushafAutoFontSize * 1.1}px` }}>﷽</div>
                               )}
                             </div>
-                            {line.newSurahBefore.hasBismillah && (
-                              <div className={`bismillah-text ${fontFamily === 'noto' ? 'font-noto' : ''}`}
-                                style={{ fontSize: `${mushafAutoFontSize * 1.1}px` }}>﷽</div>
-                            )}
-                          </div>
-                        )}
+                          );
+                        })()}
 
                         {/* The mushaf line — each word clickable */}
-                        <div className={`mushaf-line tajweed-text ${fontFamily === 'noto' ? 'font-noto' : ''}`}>
+                        <div className={`mushaf-line tajweed-text ${glyphFontReady ? '' : fontFamilyClass(fontFamily)}`}>
                           {line.items.map((item, wi) => (
                             <span
                               key={wi}
                               style={{ cursor: 'pointer' }}
-                              onClick={(e) => {
+                              onPointerDown={(e) => {
+                                if (e.pointerType === 'mouse' && e.button !== 0) return;
                                 const verse = verses.find(v => v.verse_key === item.verseKey);
-                                if (verse) handleVerseClick(verse, e as unknown as React.MouseEvent);
+                                if (!verse) return;
+                                const el = e.currentTarget;
+                                longPressTimerRef.current = setTimeout(() => {
+                                  longPressActivatedRef.current = true;
+                                  const rect = el.getBoundingClientRect();
+                                  setSelectedVerse(verse);
+                                  setShowVerseMenu(true);
+                                  setVerseMenuPosition({ x: Math.min(rect.left, window.innerWidth - 250), y: rect.bottom + 10 });
+                                }, 500);
                               }}
-                              dangerouslySetInnerHTML={{ __html: item.html }}
+                              onPointerUp={() => { if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; } }}
+                              onPointerLeave={() => { if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; } }}
+                              onPointerCancel={() => { if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; } }}
+                              dangerouslySetInnerHTML={{ __html: glyphFontReady ? item.codeV2 : item.html }}
                             />
                           ))}
                         </div>
@@ -1612,10 +1797,7 @@ export default function QuranReaderPage() {
           <div className="hidden sm:flex items-center justify-between mb-6">
             <button
               onClick={goToPrev}
-              disabled={
-                (viewMode === 'surah' && currentSurah <= 1) ||
-                (viewMode === 'hizb' && currentHizb <= 1)
-              }
+              disabled={viewMode === 'surah' && currentSurah <= 1}
               className={`flex items-center gap-2 px-3 sm:px-4 py-2 border rounded-xl disabled:opacity-30 disabled:cursor-not-allowed transition-colors ${isDark ? 'bg-gray-800/50 border-gray-700/50 hover:bg-gray-700/50 text-white' : 'bg-white/80 border-gray-300/80 hover:bg-gray-100/80 text-gray-800'}`}
             >
               <ChevronLeft className="h-5 w-5" />
@@ -1635,10 +1817,7 @@ export default function QuranReaderPage() {
 
             <button
               onClick={goToNext}
-              disabled={
-                (viewMode === 'surah' && currentSurah >= 114) ||
-                (viewMode === 'hizb' && currentHizb >= TOTAL_HIZB)
-              }
+              disabled={viewMode === 'surah' && currentSurah >= 114}
               className={`flex items-center gap-2 px-3 sm:px-4 py-2 border rounded-xl disabled:opacity-30 disabled:cursor-not-allowed transition-colors ${isDark ? 'bg-gray-800/50 border-gray-700/50 hover:bg-gray-700/50 text-white' : 'bg-white/80 border-gray-300/80 hover:bg-gray-100/80 text-gray-800'}`}
             >
               <span className="hidden sm:inline text-sm font-medium">Suivant</span>
@@ -1666,19 +1845,78 @@ export default function QuranReaderPage() {
             ) : (
               /* ── VERSE-BY-VERSE VIEW (surah / hizb modes) ── */
               <div className="space-y-2">
-                {/* Bismillah — shown when first verse is verse 1 of a surah (except Al-Fatiha and At-Tawbah) */}
+                {/* ── Ornamental Surah Header ── */}
                 {(() => {
-                  if (viewMode === 'surah') return currentSurah !== 1 && currentSurah !== 9;
-                  if (verses.length > 0 && verses[0].verse_number === 1) {
-                    const surahNum = parseInt(verses[0].verse_key.split(':')[0]);
-                    return surahNum !== 1 && surahNum !== 9;
-                  }
-                  return false;
-                })() && (
-                  <div className={`text-center py-3 mb-2 border-b ${isDark ? 'border-gray-800/50' : 'border-gray-200/50'}`}>
-                    <p className={`bismillah-text ${fontFamily === 'noto' ? 'font-noto' : ''}`}>
-                      ﷽
-                    </p>
+                  const si: Surah | undefined = currentVersePage === 1 ? (currentSurahInfo || undefined) : undefined;
+                  if (!si) return null;
+
+                  const gold = isDark ? 'rgba(205,158,45,0.75)' : 'rgba(135,95,18,0.72)';
+                  const goldFade = isDark ? 'rgba(205,158,45,0.18)' : 'rgba(135,95,18,0.18)';
+                  const divider = (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                      <div style={{ width: 8, height: 8, background: gold, transform: 'rotate(45deg)', flexShrink: 0 }} />
+                      <div style={{ flex: 1, height: '1.5px', background: `linear-gradient(90deg, ${goldFade}, ${gold}, ${goldFade})` }} />
+                      <span style={{ color: gold, fontSize: '11px', lineHeight: 1, flexShrink: 0 }}>✦</span>
+                      <div style={{ flex: 1, height: '1.5px', background: `linear-gradient(90deg, ${goldFade}, ${gold}, ${goldFade})` }} />
+                      <div style={{ width: 8, height: 8, background: gold, transform: 'rotate(45deg)', flexShrink: 0 }} />
+                    </div>
+                  );
+
+                  const SH = 22;
+                  const shCorners = [
+                    { key: 'tl', pos: { top: -SH/2, left: -SH/2 }, tx: '' },
+                    { key: 'tr', pos: { top: -SH/2, right: -SH/2 }, tx: `translate(${SH},0) scale(-1,1)` },
+                    { key: 'bl', pos: { bottom: -SH/2, left: -SH/2 }, tx: `translate(0,${SH}) scale(1,-1)` },
+                    { key: 'br', pos: { bottom: -SH/2, right: -SH/2 }, tx: `translate(${SH},${SH}) scale(-1,-1)` },
+                  ];
+                  return (
+                    <div style={{ textAlign: 'center', padding: '10px 6px 4px', margin: '4px 0 6px' }}>
+                      {divider}
+                      <div className="surah-header-box" style={{ padding: '10px 20px 8px', position: 'relative', display: 'inline-block', overflow: 'visible' }}>
+                        {/* Corner ornaments */}
+                        {shCorners.map(({ key, pos, tx }) => (
+                          <svg key={key} width={SH} height={SH} viewBox={`0 0 ${SH} ${SH}`}
+                            style={{ position: 'absolute', pointerEvents: 'none', ...pos } as React.CSSProperties}
+                            xmlns="http://www.w3.org/2000/svg">
+                            <g transform={tx || undefined}>
+                              <path d={`M ${SH} 2 Q ${SH*0.5} 2 ${SH*0.27} ${SH*0.27} Q 2 ${SH*0.5} 2 ${SH}`} stroke={gold} fill="none" strokeWidth="1.5" strokeLinecap="round"/>
+                              <path d={`M ${SH} ${SH*0.36} Q ${SH*0.65} ${SH*0.36} ${SH*0.53} ${SH*0.53} Q ${SH*0.36} ${SH*0.65} ${SH*0.36} ${SH}`} stroke={gold} fill="none" strokeWidth="0.8" strokeLinecap="round" opacity="0.4"/>
+                              <path d={`M ${SH*0.73} 2 Q ${SH-1} ${SH*0.3} ${SH*0.73} ${SH*0.52} Q ${SH*0.45} ${SH*0.3} ${SH*0.73} 2 Z`} fill={gold} opacity="0.72"/>
+                              <path d={`M 2 ${SH*0.73} Q ${SH*0.3} ${SH-1} ${SH*0.52} ${SH*0.73} Q ${SH*0.3} ${SH*0.45} 2 ${SH*0.73} Z`} fill={gold} opacity="0.72"/>
+                              <circle cx={SH*0.5} cy={SH*0.5} r="1.6" fill={gold} opacity="0.5"/>
+                            </g>
+                          </svg>
+                        ))}
+                        <div style={{
+                          fontFamily: fontFamily === 'noto' ? "'Noto Naskh Arabic', serif" : fontFamily === 'scheherazade' ? "'Scheherazade New', serif" : "'Amiri Quran', serif",
+                          fontSize: '1.6rem',
+                          fontWeight: 700,
+                          color: isDark ? '#f0dca0' : '#7b5213',
+                          marginBottom: '4px',
+                          letterSpacing: '0.02em',
+                          padding: '0 18px',
+                        }}>
+                          سُورَةُ {si.name_arabic}
+                        </div>
+                        <div style={{
+                          fontSize: '0.67rem',
+                          letterSpacing: '0.07em',
+                          textTransform: 'uppercase',
+                          color: isDark ? 'rgba(210,160,50,0.72)' : 'rgba(120,80,15,0.72)',
+                        }}>
+                          {si.translated_name?.name && `${si.translated_name.name}  ·  `}
+                          {si.verses_count} versets  ·  {si.revelation_place === 'makkah' ? 'Mecquoise' : 'Médinoise'}
+                        </div>
+                      </div>
+                      {divider}
+                    </div>
+                  );
+                })()}
+
+                {/* Bismillah — shown when first verse is verse 1 of a surah (except Al-Fatiha and At-Tawbah) */}
+                {(currentSurah !== 1 && currentSurah !== 9 && currentVersePage === 1) && (
+                  <div style={{ textAlign: 'center', padding: '6px 0 16px' }}>
+                    <p className={`bismillah-text ${fontFamilyClass(fontFamily)}`}>﷽</p>
                   </div>
                 )}
 
@@ -1688,22 +1926,36 @@ export default function QuranReaderPage() {
                     key={verse.id}
                     id={`verse-${verse.verse_key}`}
                     ref={lastSavedVerseKey === verse.verse_key ? savedVerseRef : null}
-                    onClick={(e) => handleVerseClick(verse, e)}
+                    onPointerDown={(e) => {
+                      if (e.pointerType === 'mouse' && e.button !== 0) return;
+                      const el = e.currentTarget;
+                      longPressTimerRef.current = setTimeout(() => {
+                        longPressActivatedRef.current = true;
+                        const rect = el.getBoundingClientRect();
+                        setSelectedVerse(verse);
+                        setShowVerseMenu(true);
+                        setVerseMenuPosition({ x: Math.min(rect.left, window.innerWidth - 250), y: rect.bottom + 10 });
+                      }, 500);
+                    }}
+                    onPointerUp={() => { if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; } }}
+                    onPointerLeave={() => { if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; } }}
+                    onPointerCancel={() => { if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; } }}
                     className={`verse-clickable ${selectedVerse?.id === verse.id ? 'selected' : ''} ${
                       lastSavedVerseKey === verse.verse_key ? 'saved-verse' : ''
-                    }`}
+                    } ${audioVerseKey === verse.verse_key ? 'audio-playing' : ''}`}
                   >
                     {/* Arabic Text */}
                     {(languageMode === 'arabic' || languageMode === 'both') && (
                       <div className="flex items-start justify-end gap-2">
                         <div
-                          className={`tajweed-text ${fontFamily === 'noto' ? 'font-noto' : ''} ${fontSizes[fontSize]} flex-1`}
+                          className={`tajweed-text ${fontFamilyClass(fontFamily)} ${fontSizes[fontSize]} flex-1`}
                           dangerouslySetInnerHTML={{
                             __html: processTajweedHtml(verse.text_uthmani_tajweed || verse.text_uthmani)
                           }}
                         />
                         <span className="verse-number flex-shrink-0">
-                          {verse.verse_number}
+                          <span className="qv-r">۝</span>
+                          <span className="qv-n">{toArabicNumerals(verse.verse_number)}</span>
                         </span>
                       </div>
                     )}
@@ -1750,92 +2002,185 @@ export default function QuranReaderPage() {
                   />
                 </div>
               )}
-              {viewMode === 'hizb' && (
-                <div className="flex items-center gap-2">
-                  <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Hizb:</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={TOTAL_HIZB}
-                    value={currentHizb}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value);
-                      if (!isNaN(val) && val >= 1 && val <= TOTAL_HIZB) setCurrentHizb(val);
-                    }}
-                    onBlur={(e) => {
-                      const val = parseInt(e.target.value);
-                      if (isNaN(val) || val < 1 || val > TOTAL_HIZB) setCurrentHizb(1);
-                    }}
-                    className="input-modern w-20 text-center"
-                  />
-                </div>
-              )}
             </div>
           )}
 
         </div>
         )} {/* end viewMode !== 'page' */}
 
-        {/* Bottom Navigation Bar */}
-        <div ref={bottomNavRef} className={`fixed bottom-0 left-0 right-0 z-40 border-t backdrop-blur-md ${isDark ? 'bg-[#1a1f2e]/95 border-gray-700/50' : 'bg-white/95 border-gray-200/80'}`}>
-          <div className="flex items-center justify-around px-2 py-2 pb-safe">
-            {/* Previous */}
-            <button
-              onClick={goToPrev}
-              disabled={
-                (viewMode === 'page' && currentPage <= 1) ||
-                (viewMode === 'surah' && currentSurah <= 1) ||
-                (viewMode === 'hizb' && currentHizb <= 1)
-              }
-              className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed transition-colors ${isDark ? 'text-gray-400 hover:text-white active:bg-gray-700/50' : 'text-gray-500 hover:text-gray-900 active:bg-gray-100'}`}
+        {/* Overlay bar — compact top bar, shown on tap, auto-hides after 3.5s */}
+        {showOverlay && (
+          <div
+            className="overlay-slide-down fixed top-0 left-0 right-0 z-50"
+            onClick={(e) => { e.stopPropagation(); resetOverlayTimer(); }}
+          >
+            <div
+              className={`${isDark ? 'bg-[#0d1117]/96 border-gray-800/70' : 'bg-white/96 border-gray-200/80'} backdrop-blur-xl border-b shadow-xl`}
+              style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
             >
-              <ChevronLeft className="h-5 w-5" />
-              <span className="text-[10px]">Précédent</span>
-            </button>
+              <div className="flex items-center px-2 py-1.5 gap-1">
 
-            {/* Surah List */}
-            <button
-              onClick={() => setShowSurahList(true)}
-              className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-colors ${isDark ? 'text-gray-400 hover:text-white active:bg-gray-700/50' : 'text-gray-500 hover:text-gray-900 active:bg-gray-100'}`}
-            >
-              <List className="h-5 w-5" />
-              <span className="text-[10px]">Sourates</span>
-            </button>
+                {/* Back / home */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); navigate('/'); }}
+                  className={`flex items-center gap-1 px-2.5 py-2 rounded-xl text-sm font-medium transition-colors flex-shrink-0 ${isDark ? 'text-gray-300 hover:text-white hover:bg-gray-800' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  {!isAuthenticated && (
+                    <LogIn className="h-3.5 w-3.5 text-emerald-500" />
+                  )}
+                </button>
 
-            {/* Current Position (center) — clickable to open picker */}
-            <button
-              onClick={() => { const v = viewMode === 'page' ? currentPage : viewMode === 'hizb' ? currentHizb : currentSurah; setPickerValue(v); setPickerInputStr(String(v)); setShowPositionPicker(true); }}
-              className={`flex flex-col items-center px-2 min-w-0 max-w-[110px] rounded-xl py-1 transition-colors active:scale-95 ${isDark ? 'hover:bg-gray-700/50 active:bg-gray-700' : 'hover:bg-gray-100 active:bg-gray-200'}`}
-            >
-              <span className={`text-sm font-bold font-arabic truncate w-full text-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                {getPositionLabel()}
-              </span>
-              <span className="text-[10px] text-emerald-500">{readingProgress}% · appuyer</span>
-            </button>
+                {/* Position label — tappable to open position picker */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const v = viewMode === 'page' ? currentPage : currentSurah;
+                    setPickerValue(v);
+                    setPickerInputStr(String(v));
+                    setShowOverlay(false);
+                    if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+                    setShowPositionPicker(true);
+                  }}
+                  className="flex-1 min-w-0 text-center px-1 py-1.5 rounded-xl transition-colors"
+                >
+                  <div className={`text-sm font-bold font-arabic leading-tight truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                    {getPositionLabel()}
+                  </div>
+                  <div className={`text-[10px] font-medium leading-tight ${isDark ? 'text-emerald-400/80' : 'text-emerald-600/80'}`}>
+                    {readingProgress}%
+                  </div>
+                </button>
 
-            {/* Settings */}
-            <button
-              onClick={() => setShowSettings(true)}
-              className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-colors ${isDark ? 'text-gray-400 hover:text-white active:bg-gray-700/50' : 'text-gray-500 hover:text-gray-900 active:bg-gray-100'}`}
-            >
-              <Settings className="h-5 w-5" />
-              <span className="text-[10px]">Réglages</span>
-            </button>
+                {/* View mode — Apple-like sliding segmented control */}
+                <div
+                  className={`relative flex rounded-xl p-0.5 flex-shrink-0 ${isDark ? 'bg-gray-800' : 'bg-gray-100'}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Sliding pill */}
+                  <div
+                    className="absolute top-0.5 bottom-0.5 w-8 rounded-[10px] bg-emerald-600 shadow-md"
+                    style={{
+                      left: viewMode === 'surah' ? '2px' : '34px',
+                      transition: 'left 0.22s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                    }}
+                  />
+                  <button
+                    onClick={() => { switchViewMode('surah'); resetOverlayTimer(); }}
+                    className={`relative z-10 w-8 h-8 flex items-center justify-center rounded-[10px] transition-colors duration-200 ${viewMode === 'surah' ? 'text-white' : isDark ? 'text-gray-500' : 'text-gray-400'}`}
+                  >
+                    <BookOpen className="h-[15px] w-[15px]" />
+                  </button>
+                  <button
+                    onClick={() => { switchViewMode('page'); resetOverlayTimer(); }}
+                    className={`relative z-10 w-8 h-8 flex items-center justify-center rounded-[10px] transition-colors duration-200 ${viewMode === 'page' ? 'text-white' : isDark ? 'text-gray-500' : 'text-gray-400'}`}
+                  >
+                    <Layers className="h-[15px] w-[15px]" />
+                  </button>
+                </div>
 
-            {/* Next */}
-            <button
-              onClick={goToNext}
-              disabled={
-                (viewMode === 'page' && currentPage >= TOTAL_PAGES) ||
-                (viewMode === 'surah' && currentSurah >= 114) ||
-                (viewMode === 'hizb' && currentHizb >= TOTAL_HIZB)
-              }
-              className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed transition-colors ${isDark ? 'text-gray-400 hover:text-white active:bg-gray-700/50' : 'text-gray-500 hover:text-gray-900 active:bg-gray-100'}`}
-            >
-              <ChevronRight className="h-5 w-5" />
-              <span className="text-[10px]">Suivant</span>
-            </button>
+                {/* List */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowOverlay(false); if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current); setShowSurahList(true); }}
+                  className={`p-2 rounded-xl transition-colors flex-shrink-0 ${isDark ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}
+                >
+                  <List className="h-5 w-5" />
+                </button>
+
+                {/* Play surah audio */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (audioPlaying && audioMode === 'surah') {
+                      audioRef.current?.pause();
+                      setAudioPlaying(false);
+                    } else {
+                      playSurah();
+                    }
+                    resetOverlayTimer();
+                  }}
+                  className={`p-2 rounded-xl transition-colors flex-shrink-0 ${
+                    audioPlaying && audioMode === 'surah'
+                      ? 'text-emerald-400'
+                      : isDark ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
+                  }`}
+                  title="Écouter la sourate"
+                >
+                  {audioLoadingKey?.startsWith('surah-')
+                    ? <Loader2 className="h-5 w-5 animate-spin" />
+                    : audioPlaying && audioMode === 'surah'
+                      ? <Pause className="h-5 w-5" />
+                      : <Music className="h-5 w-5" />}
+                </button>
+
+                {/* Settings */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowOverlay(false); if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current); setShowSettings(true); }}
+                  className={`p-2 rounded-xl transition-colors flex-shrink-0 ${isDark ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}
+                >
+                  <Settings className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* Progress bar */}
+              <div className={`h-0.5 ${isDark ? 'bg-gray-800/60' : 'bg-gray-200/60'}`}>
+                <div
+                  className="h-full bg-emerald-500 transition-all duration-500 ease-out"
+                  style={{ width: `${readingProgress}%` }}
+                />
+              </div>
+            </div>
           </div>
+        )}
+
+        {/* Mini audio player bar — fixed just above tab bar */}
+        {audioVerseKey && (
+          <div
+            className={`fixed left-0 right-0 z-30 ${isDark ? 'bg-gray-900/95 border-gray-800' : 'bg-white/95 border-gray-200'} border-t backdrop-blur-xl`}
+            style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 64px)' }}
+          >
+            {/* Progress line */}
+            <div className={`h-0.5 ${isDark ? 'bg-gray-800' : 'bg-gray-200'}`}>
+              <div
+                className="h-full bg-emerald-500 transition-all duration-300"
+                style={{ width: `${audioProgress}%` }}
+              />
+            </div>
+            <div className="flex items-center gap-3 px-4 py-2">
+              {/* Verse info */}
+              <div className="flex-1 min-w-0">
+                <p className={`text-xs font-semibold font-arabic truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                  {audioVerseKey}
+                </p>
+                <p className={`text-[10px] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                  {audioMode === 'surah' ? 'Sourate en cours' : 'Verset en cours'}
+                </p>
+              </div>
+              {/* Play/pause */}
+              <button
+                onClick={() => {
+                  if (!audioRef.current) return;
+                  if (audioPlaying) { audioRef.current.pause(); setAudioPlaying(false); }
+                  else { audioRef.current.play().then(() => setAudioPlaying(true)).catch(() => {}); }
+                }}
+                className={`p-2 rounded-full transition-colors ${isDark ? 'bg-gray-800 text-white hover:bg-gray-700' : 'bg-gray-100 text-gray-900 hover:bg-gray-200'}`}
+              >
+                {audioPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+              </button>
+              {/* Stop */}
+              <button
+                onClick={stopAudio}
+                className={`p-2 rounded-full transition-colors ${isDark ? 'text-gray-500 hover:text-white hover:bg-gray-800' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'}`}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* App Bottom Tab Bar */}
+        <div ref={bottomNavRef}>
+          <BottomTabBar />
         </div>
 
         {/* Surah List Drawer */}
@@ -1859,28 +2204,8 @@ export default function QuranReaderPage() {
               </button>
             </div>
 
-            {/* Tabs */}
-            <div className={`flex gap-1 px-5 py-3 border-b flex-shrink-0 ${isDark ? 'border-gray-800' : 'border-gray-200'}`}>
-              {([
-                { tab: 'surah' as const, label: 'Sourates' },
-                { tab: 'hizb' as const, label: 'Hizb' },
-              ]).map(({ tab, label }) => (
-                <button
-                  key={tab}
-                  onClick={() => setSurahDrawerTab(tab)}
-                  className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                    surahDrawerTab === tab
-                      ? 'bg-emerald-600 text-white'
-                      : isDark ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* Search (surah tab only) */}
-            {surahDrawerTab === 'surah' && (
+            {/* Search */}
+            {(
               <div className={`px-5 py-3 border-b flex-shrink-0 ${isDark ? 'border-gray-800' : 'border-gray-200'}`}>
                 <input
                   type="text"
@@ -1894,55 +2219,37 @@ export default function QuranReaderPage() {
 
             {/* List Body */}
             <div className="flex-1 overflow-y-auto">
-              {surahDrawerTab === 'surah' ? (
-                <div className="p-3 space-y-1">
-                  {surahs
-                    .filter((s) => {
-                      if (!surahSearch.trim()) return true;
-                      const q = surahSearch.toLowerCase();
-                      return (
-                        s.name_arabic.includes(surahSearch) ||
-                        s.translated_name.name.toLowerCase().includes(q) ||
-                        String(s.id).includes(q)
-                      );
-                    })
-                    .map((surah) => (
-                      <button
-                        key={surah.id}
-                        onClick={() => { selectSurah(surah.id); setSurahSearch(''); }}
-                        className={`flex items-center justify-between w-full px-3 py-2.5 rounded-xl transition-colors gap-3 ${
-                          currentSurah === surah.id && viewMode === 'surah'
-                            ? 'bg-emerald-600/20 border border-emerald-500/30 text-emerald-500'
-                            : isDark ? 'hover:bg-gray-800 text-white' : 'hover:bg-gray-50 text-gray-900'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className={`text-xs font-medium w-6 text-center flex-shrink-0 rounded-md py-0.5 ${isDark ? 'bg-gray-800 text-gray-500' : 'bg-gray-100 text-gray-400'}`}>{surah.id}</span>
-                          <span className="font-arabic text-base truncate">{surah.name_arabic}</span>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          <span className={`text-xs truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{surah.translated_name.name}</span>
-                        </div>
-                      </button>
-                    ))}
-                </div>
-              ) : (
-                <div className="p-4 grid grid-cols-5 gap-2">
-                  {Array.from({ length: TOTAL_HIZB }, (_, i) => i + 1).map((hizb) => (
+              <div className="p-3 space-y-1">
+                {surahs
+                  .filter((s) => {
+                    if (!surahSearch.trim()) return true;
+                    const q = surahSearch.toLowerCase();
+                    return (
+                      s.name_arabic.includes(surahSearch) ||
+                      s.translated_name.name.toLowerCase().includes(q) ||
+                      String(s.id).includes(q)
+                    );
+                  })
+                  .map((surah) => (
                     <button
-                      key={hizb}
-                      onClick={() => { setCurrentHizb(hizb); setViewMode('hizb'); setShowSurahList(false); }}
-                      className={`aspect-square flex items-center justify-center rounded-xl text-sm font-medium transition-colors ${
-                        currentHizb === hizb && viewMode === 'hizb'
-                          ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/30'
-                          : isDark ? 'bg-gray-800 hover:bg-gray-700 text-gray-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                      key={surah.id}
+                      onClick={() => { selectSurah(surah.id); setSurahSearch(''); }}
+                      className={`flex items-center justify-between w-full px-3 py-2.5 rounded-xl transition-colors gap-3 ${
+                        currentSurah === surah.id && viewMode === 'surah'
+                          ? 'bg-emerald-600/20 border border-emerald-500/30 text-emerald-500'
+                          : isDark ? 'hover:bg-gray-800 text-white' : 'hover:bg-gray-50 text-gray-900'
                       }`}
                     >
-                      {hizb}
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className={`text-xs font-medium w-6 text-center flex-shrink-0 rounded-md py-0.5 ${isDark ? 'bg-gray-800 text-gray-500' : 'bg-gray-100 text-gray-400'}`}>{surah.id}</span>
+                        <span className="font-arabic text-base truncate">{surah.name_arabic}</span>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <span className={`text-xs truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{surah.translated_name.name}</span>
+                      </div>
                     </button>
                   ))}
-                </div>
-              )}
+              </div>
             </div>
           </div>
         </div>
@@ -1995,6 +2302,58 @@ export default function QuranReaderPage() {
                 </div>
               </div>
 
+              {/* Translation */}
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Traduction</p>
+                <div className={`flex gap-2 rounded-xl p-1 border ${isDark ? 'bg-gray-800/50 border-gray-700/50' : 'bg-gray-100/80 border-gray-300/50'}`}>
+                  {([
+                    { id: 136, label: 'Montada' },
+                    { id: 31, label: 'Hamidullah' },
+                  ] as { id: number; label: string }[]).map(({ id, label }) => (
+                    <button
+                      key={id}
+                      onClick={() => setSelectedTranslationId(id)}
+                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                        selectedTranslationId === id
+                          ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50'
+                          : isDark ? 'text-gray-400 hover:text-white hover:bg-gray-700/50' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/70'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Récitateur */}
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Récitateur</p>
+                <div className={`flex flex-col gap-1.5 rounded-xl p-1 border ${isDark ? 'bg-gray-800/50 border-gray-700/50' : 'bg-gray-100/80 border-gray-300/50'}`}>
+                  {([
+                    { id: 7, label: 'Mishari al-Afasy' },
+                    { id: 1, label: 'Abdul Basit' },
+                    { id: 6, label: 'Sudais' },
+                    { id: 8, label: 'Minshawi' },
+                  ] as { id: number; label: string }[]).map(({ id, label }) => (
+                    <button
+                      key={id}
+                      onClick={() => {
+                        setAudioReciterId(id);
+                        localStorage.setItem('quran-reciter-id', String(id));
+                        stopAudio();
+                      }}
+                      className={`px-3 py-2 rounded-lg text-sm font-medium transition-all text-left ${
+                        audioReciterId === id
+                          ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50'
+                          : isDark ? 'text-gray-400 hover:text-white hover:bg-gray-700/50' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/70'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Font Size */}
               <div>
                 <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Taille du texte</p>
@@ -2023,10 +2382,13 @@ export default function QuranReaderPage() {
               {/* Typography */}
               <div>
                 <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Typographie</p>
-                <div className={`flex gap-2 rounded-xl p-1 border ${isDark ? 'bg-gray-800/50 border-gray-700/50' : 'bg-gray-100/80 border-gray-300/50'}`}>
+                <div className={`flex flex-wrap gap-2 rounded-xl p-1 border ${isDark ? 'bg-gray-800/50 border-gray-700/50' : 'bg-gray-100/80 border-gray-300/50'}`}>
                   {([
+                    { family: 'scheherazade' as FontFamily, label: 'Scheherazade' },
                     { family: 'amiri' as FontFamily, label: 'Amiri Quran' },
                     { family: 'noto' as FontFamily, label: 'Noto Naskh' },
+                    { family: 'v2' as FontFamily, label: 'QPC V2' },
+                    { family: 'v4' as FontFamily, label: 'QPC V4' },
                   ] as { family: FontFamily; label: string }[]).map(({ family, label }) => (
                     <button
                       key={family}
@@ -2081,12 +2443,12 @@ export default function QuranReaderPage() {
               <div className={`w-10 h-1 rounded-full mx-auto mb-5 ${isDark ? 'bg-gray-700' : 'bg-gray-300'}`} />
 
               <p className={`text-center text-base font-semibold mb-6 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                {viewMode === 'page' ? 'Aller à la page' : viewMode === 'hizb' ? 'Aller au hizb' : 'Aller à la sourate'}
+                {viewMode === 'page' ? 'Aller à la page' : 'Aller à la sourate'}
               </p>
 
               {/* Number picker */}
               {(() => {
-                const max = viewMode === 'page' ? TOTAL_PAGES : viewMode === 'hizb' ? TOTAL_HIZB : 114;
+                const max = viewMode === 'page' ? TOTAL_PAGES : 114;
                 const bump = (delta: number) => {
                   const next = Math.min(max, Math.max(1, pickerValue + delta));
                   setPickerValue(next);
@@ -2150,7 +2512,6 @@ export default function QuranReaderPage() {
                     <button
                       onClick={() => {
                         if (viewMode === 'page') setCurrentPage(confirmedValue);
-                        else if (viewMode === 'hizb') setCurrentHizb(confirmedValue);
                         else { setCurrentSurah(confirmedValue); setCurrentVersePage(1); }
                         setShowPositionPicker(false);
                         scrollToTop();
@@ -2219,10 +2580,19 @@ export default function QuranReaderPage() {
                 </li>
                 <li>
                   <button
-                    className="flex items-center gap-3 px-3 py-3 sm:py-2 text-sm text-gray-400 rounded-xl sm:rounded-md w-full text-left opacity-50 cursor-not-allowed"
-                    disabled
+                    onClick={() => {
+                      if (selectedVerse) {
+                        playVerse(selectedVerse.verse_key);
+                        setShowVerseMenu(false);
+                        setSelectedVerse(null);
+                      }
+                    }}
+                    disabled={audioLoadingKey !== null}
+                    className={`flex items-center gap-3 px-3 py-3 sm:py-2 text-sm text-blue-400 rounded-xl sm:rounded-md w-full text-left disabled:opacity-50 ${isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}
                   >
-                    <Play className="h-5 w-5 sm:h-4 sm:w-4" />
+                    {audioLoadingKey === selectedVerse?.verse_key
+                      ? <Loader2 className="h-5 w-5 sm:h-4 sm:w-4 animate-spin" />
+                      : <Play className="h-5 w-5 sm:h-4 sm:w-4" />}
                     Écouter ce verset
                   </button>
                 </li>

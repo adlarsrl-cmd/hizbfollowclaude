@@ -137,8 +137,8 @@ export default function TermsPage() {
           <section>
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-3">10. Droit applicable</h2>
             <p>
-              Les présentes CGU sont soumises au droit français. Tout litige relatif à leur interprétation
-              ou à leur exécution sera soumis à la compétence des tribunaux français.
+              Les présentes CGU sont soumises au droit belge. Tout litige relatif à leur interprétation
+              ou à leur exécution sera soumis à la compétence des tribunaux belges.
             </p>
           </section>
 

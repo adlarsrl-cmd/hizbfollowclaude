@@ -1,380 +1,149 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   BarChart3,
   Users,
-  Calendar,
-  Download,
-  Eye,
-  EyeOff,
-  Target,
-  Award,
-  Zap,
-  TrendingDown,
-  TrendingUp,
-  CheckCircle,
-  Loader2
 } from 'lucide-react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-  ReferenceLine
-} from 'recharts';
 import { useAppStore } from '../stores/useAppStore';
+import { supabase } from '../lib/supabase';
 import { Skeleton } from '../components/ui/Skeleton';
 import {
   getWeekKeyTuesday,
-  toCSV,
   calculateWeeklyDeltas,
-  calculateMonthlyAverages,
   calculateHizbRetard,
   parseWeekKeyTuesday
 } from '../lib/utils';
+
+// ── Rank badge colors ────────────────────────────────────────────────────────
+function rankBadge(rank: number) {
+  if (rank === 1) return { bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-600 dark:text-amber-400', label: '🥇' };
+  if (rank === 2) return { bg: 'bg-slate-100 dark:bg-slate-700', text: 'text-slate-600 dark:text-slate-300', label: '🥈' };
+  if (rank === 3) return { bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-600 dark:text-orange-400', label: '🥉' };
+  return { bg: 'bg-slate-50 dark:bg-slate-800', text: 'text-slate-500 dark:text-slate-400', label: String(rank) };
+}
 
 export default function AnalyticsPage() {
   const {
     participants,
     entries,
-    currentUnit,
     fetchParticipants,
     fetchEntries,
     loading,
-    currentUserRole
+    currentUserRole,
+    activeGroupId,
+    user,
   } = useAppStore();
 
+  const [analyticsMode, setAnalyticsMode] = useState<'personal' | 'group'>('personal');
   const isLoading = loading.participants || loading.entries;
 
-  // Responsive: detect mobile for chart adjustments
-  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 640);
-  useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth < 640);
-    window.addEventListener('resize', handler);
-    return () => window.removeEventListener('resize', handler);
-  }, []);
+  // All group data (loaded directly for group mode, bypasses role-based store filter)
+  const [allGroupParticipants, setAllGroupParticipants] = useState<any[]>([]);
+  const [allGroupEntries, setAllGroupEntries] = useState<any[]>([]);
+  const [loadingGroupData, setLoadingGroupData] = useState(false);
 
-  // état sélection participants
-  const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
-
-  // visibilité tableaux
-  const [showWeeklyTable, setShowWeeklyTable] = useState(true);
-  const [showMonthlyTable, setShowMonthlyTable] = useState(true);
-
-  // sélections mois/périodes
-  const [selectedMonth, setSelectedMonth] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`;
-  });
-  const [comparisonMonth, setComparisonMonth] = useState<string>('');
-
-  const [weeklyReadingsMode, setWeeklyReadingsMode] = useState<'month' | 'weeks'>('month');
-  const [weeklyReadingsPeriod, setWeeklyReadingsPeriod] = useState<2 | 4 | 8 | 12>(8);
-
-  const [comparisonMode, setComparisonMode] = useState(false);
-  const [weeklyPeriod, setWeeklyPeriod] = useState<4 | 6 | 8 | 12 | 16>(8);
-
-  // plage pour tableau mensuel - will be initialized after entries are loaded
-  const [monthlyFromDate, setMonthlyFromDate] = useState<string>('');
-  const [monthlyToDate, setMonthlyToDate] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`;
-  });
-  const hasInitializedMonthlyFromDate = useRef(false);
+  // Global hizb (cross-group) — source de vérité pour "hizb actuel" et "khatma n°X"
+  const [globalCurrentHizb, setGlobalCurrentHizb]   = useState<number | null>(null);
+  const [globalCurrentCycle, setGlobalCurrentCycle] = useState<number | null>(null);
+  const [globalHizbByUser, setGlobalHizbByUser]     = useState<Record<string, number>>({});
+  const [globalCycleByUser, setGlobalCycleByUser]   = useState<Record<string, number>>({});
 
   useEffect(() => {
     fetchParticipants();
     fetchEntries();
   }, []);
 
-  // indexations pour perfs basées sur entries
-  const { byParticipant, monthsSet } = useMemo(() => {
-    const byParticipant = new Map<string, any[]>();
-    const monthsSet = new Set<string>();
-
-    for (const entry of entries as any[]) {
-      if (!byParticipant.has(entry.participant_id)) byParticipant.set(entry.participant_id, []);
-      byParticipant.get(entry.participant_id)!.push(entry);
-
-      const d = new Date(entry.recorded_at);
-      monthsSet.add(`${d.getFullYear()}-${String(d.getMonth() + 1).toString().padStart(2, '0')}`);
-    }
-    for (const arr of byParticipant.values()) {
-      arr.sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
-    }
-    return { byParticipant, monthsSet };
-  }, [entries]);
-
-  // participants filtrés
-  const filteredParticipants = useMemo(
-    () => participants.filter(p => selectedParticipantIds.includes(p.id) && p.active),
-    [participants, selectedParticipantIds]
-  );
-
-  // mois disponibles
-  const availableMonths = useMemo(() => {
-    return Array.from(monthsSet).sort().reverse();
-  }, [monthsSet]);
-
-  // First month with entries (for initialization)
-  const firstMonthWithEntries = useMemo(() => {
-    if (monthsSet.size === 0) return null;
-    const sortedMonths = Array.from(monthsSet).sort();
-    return sortedMonths[0];
-  }, [monthsSet]);
-
-  // init sélection quand les participants arrivent
+  // Fetch global current hizb + cycle for the logged-in user (no group filter)
   useEffect(() => {
-    if (participants.length > 0 && selectedParticipantIds.length === 0) {
-      setSelectedParticipantIds(participants.filter(p => p.active).map(p => p.id));
-    }
-  }, [participants]);
-
-  // Initialize monthlyFromDate to first month with entries
-  useEffect(() => {
-    if (entries.length > 0 && firstMonthWithEntries) {
-      // Always set to first month if:
-      // 1. Not initialized yet, OR
-      // 2. Current date is empty, OR
-      // 3. Current date is not the first month (user might have changed it, but default should be first)
-      if (!hasInitializedMonthlyFromDate.current || !monthlyFromDate || monthlyFromDate !== firstMonthWithEntries) {
-        setMonthlyFromDate(firstMonthWithEntries);
-        hasInitializedMonthlyFromDate.current = true;
-      }
-    } else if (entries.length === 0 && !hasInitializedMonthlyFromDate.current) {
-      // If no entries yet, default to current month
-      const now = new Date();
-      setMonthlyFromDate(`${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`);
-      hasInitializedMonthlyFromDate.current = true;
-    }
-  }, [entries.length, firstMonthWithEntries, monthlyFromDate]);
-
-  // Reset comparison month when comparison mode is disabled
-  useEffect(() => {
-    if (!comparisonMode && comparisonMonth) {
-      setComparisonMonth('');
-    }
-  }, [comparisonMode, comparisonMonth]);
-
-  // handlers sélection participants
-  const handleSelectAll = () => {
-    setSelectedParticipantIds(participants.filter(p => p.active).map(p => p.id));
-  };
-  const handleResetAll = () => setSelectedParticipantIds([]);
-  const toggleParticipant = (pid: string) => {
-    setSelectedParticipantIds(prev =>
-      prev.includes(pid) ? prev.filter(id => id !== pid) : [...prev, pid]
-    );
-  };
-
-  // données mensuelles (classement par moyenne)
-  const monthlyData = useMemo(() => {
-    if (!selectedMonth) return [];
-
-    return filteredParticipants
-      .map(participant => {
-        const average = calculateMonthlyAverages(entries, participant.id, selectedMonth, participant.user_id);
-        const comparisonAverage = comparisonMode && comparisonMonth
-          ? calculateMonthlyAverages(entries, participant.id, comparisonMonth, participant.user_id)
-          : null;
-
-        return {
-          name: participant.name,
-          participant_id: participant.id,
-          average: Math.round(average * 10) / 10,
-          comparisonAverage: comparisonAverage !== null ? Math.round(comparisonAverage * 10) / 10 : null,
-          total: Math.round(average * 4.33 * 10) / 10, // Approximate monthly total
-          weeks: 4 // Approximate weeks per month
-        };
-      })
-      .sort((a, b) => b.average - a.average);
-  }, [filteredParticipants, entries, selectedMonth, comparisonMode, comparisonMonth]);
-
-  // données hebdo pour graph (par mois OU dernières X semaines)
-  const weeklyData = useMemo(() => {
-    const buildForWeeks = (weeks: { weekKey: string; date: string; fullDate: Date; monthLabel?: string }[]) => {
-      const chartData = filteredParticipants.map(participant => {
-        const row: any = { name: participant.name, participant_id: participant.id };
-        const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id, participant.user_id);
-        const deltaMap = new Map(weeklyDeltas.map(w => [w.week, w.delta]));
-
-        weeks.forEach(week => {
-          const weekNumber = week.weekKey.split('-W')[1]?.replace('-TUE', '') || '';
-          const dataKey = week.monthLabel ? `${week.date}_${week.monthLabel}` : week.date;
-          row[dataKey] = deltaMap.get(weekNumber) || 0;
-        });
-        return row;
-      });
-      return { chartData, weeks };
-    };
-
-    const getWeeksForMonth = (year: number, month: number, monthLabel?: string) => {
-      const first = new Date(year, month - 1, 1);
-      const last = new Date(year, month, 0);
-      const cur = new Date(first);
-      cur.setDate(cur.getDate() - cur.getDay() + 1);
-      const weeks: any[] = [];
-      while (cur <= last) {
-        const tue = new Date(cur);
-        tue.setDate(tue.getDate() + 1);
-        const weekKey = getWeekKeyTuesday(tue);
-        weeks.push({
-          weekKey,
-          date: tue.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
-          fullDate: tue,
-          monthLabel
-        });
-        cur.setDate(cur.getDate() + 7);
-      }
-      return weeks;
-    };
-
-    if (weeklyReadingsMode === 'month') {
-      if (!selectedMonth) return { chartData: [], weeks: [] as any[] };
-      const [year, month] = selectedMonth.split('-').map(Number);
-      
-      let weeks = getWeeksForMonth(year, month);
-      
-      // If comparison mode is enabled and comparison month is selected, merge weeks from both months
-      if (comparisonMode && comparisonMonth) {
-        const [compYear, compMonth] = comparisonMonth.split('-').map(Number);
-        const compWeeks = getWeeksForMonth(compYear, compMonth, 'comp');
-        
-        // Merge weeks, alternating between months
-        const mergedWeeks: any[] = [];
-        const maxWeeks = Math.max(weeks.length, compWeeks.length);
-        
-        for (let i = 0; i < maxWeeks; i++) {
-          if (i < weeks.length) {
-            mergedWeeks.push(weeks[i]);
-          }
-          if (i < compWeeks.length) {
-            mergedWeeks.push(compWeeks[i]);
-          }
+    if (!user?.id) return;
+    supabase
+      .from('entries')
+      .select('value_int, cycle_number')
+      .eq('user_id', user.id)
+      .neq('source', 'starting_point')
+      .order('recorded_at', { ascending: false })
+      .limit(1)
+      .then(({ data }) => {
+        if (data?.[0] !== undefined) {
+          setGlobalCurrentHizb(data[0].value_int);
+          setGlobalCurrentCycle(data[0].cycle_number ?? 0);
         }
-        
-        weeks = mergedWeeks;
-      }
-      
-      return buildForWeeks(weeks);
-    } else {
-      const now = new Date();
-      const weeks: any[] = [];
-      for (let i = weeklyReadingsPeriod - 1; i >= 0; i--) {
-        const anchor = new Date(now);
-        anchor.setDate(anchor.getDate() - i * 7);
-        const weekKey = getWeekKeyTuesday(anchor);
-        const tue = parseWeekKeyTuesday(weekKey);
-
-        weeks.push({
-          weekKey,
-          date: tue.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
-          fullDate: tue
-        });
-      }
-      return buildForWeeks(weeks);
-    }
-  }, [filteredParticipants, entries, selectedMonth, weeklyReadingsMode, weeklyReadingsPeriod, comparisonMode, comparisonMonth]);
-
-  // tableau hebdo (timeline/heatmap/table)
-  const weeklyTableData = useMemo(() => {
-    const now = new Date();
-    const weeks: any[] = [];
-    for (let i = weeklyPeriod - 1; i >= 0; i--) {
-      const anchor = new Date(now);
-      anchor.setDate(anchor.getDate() - i * 7);
-      const weekKey = getWeekKeyTuesday(anchor);
-      // ✅ mardi réel
-      const tue = parseWeekKeyTuesday(weekKey);
-      weeks.push({
-        weekKey,
-        date: tue.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })
       });
-    }
+  }, [user?.id]);
 
-    return filteredParticipants.map(participant => {
-      const row: any = {
-        name: participant.name,
-        participant_id: participant.id,
-        target: participant.weekly_target_hizb || 7
-      };
-      const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id, participant.user_id);
-      const deltaMap = new Map(weeklyDeltas.map(w => [w.week, w.delta]));
+  // Load full group data when switching to group mode (bypasses role-based store filter)
+  useEffect(() => {
+    if (analyticsMode !== 'group' || !activeGroupId) return;
+    setLoadingGroupData(true);
 
-      weeks.forEach(week => {
-        const weekNumber = week.weekKey.split('-W')[1]?.replace('-TUE', '') || '';
-        row[week.date] = deltaMap.get(weekNumber) || 0;
-      });
+    supabase
+      .from('participants')
+      .select('*')
+      .eq('group_id', activeGroupId)
+      .eq('active', true)
+      .order('created_at')
+      .then(async ({ data: pData }) => {
+        const allParts = pData || [];
+        setAllGroupParticipants(allParts);
 
-      return { participant, data: row, weeks };
-    });
-  }, [filteredParticipants, entries, weeklyPeriod]);
+        // Load ALL entries for this group filtered by participant_id (covers real + ghost)
+        const allParticipantIds = allParts.map(p => p.id);
+        const userIds = allParts.map(p => p.user_id).filter(Boolean) as string[];
 
-  // tableau mensuel (moyennes)
-  const monthlyTableData = useMemo(() => {
-    // If monthlyFromDate is not set yet, return empty array
-    if (!monthlyFromDate) return [];
-    
-    const fromDate = new Date(monthlyFromDate + '-01');
-    const toDate = new Date(monthlyToDate + '-01');
-
-    const months: string[] = [];
-    const cur = new Date(fromDate);
-    while (cur <= toDate) {
-      months.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`);
-      cur.setMonth(cur.getMonth() + 1);
-    }
-
-    return filteredParticipants.map(participant => {
-      const row: any = {
-        name: participant.name,
-        participant_id: participant.id,
-        target: participant.weekly_target_hizb || 7
-      };
-
-      months.forEach(monthKey => {
-        const average = calculateMonthlyAverages(entries, participant.id, monthKey, participant.user_id);
-        row[monthKey] = Math.round(average * 100) / 100;
-      });
-
-      return { participant, data: row, months };
-    });
-  }, [filteredParticipants, entries, monthlyFromDate, monthlyToDate]);
-
-  // stats d'en-tête rapides (facultatifs)
-  const headerStats = useMemo(() => {
-    const active = participants.filter(p => p.active).length;
-    const now = new Date();
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - now.getDay() + 1);
-    monday.setHours(0, 0, 0, 0);
-
-    let total = 0;
-    let count = 0;
-    for (const arr of byParticipant.values()) {
-      for (const entry of arr) {
-        if (new Date(entry.recorded_at) >= monday) {
-          total += entry.value_int; // approximation simple
-          count++;
+        if (allParticipantIds.length === 0) {
+          setAllGroupEntries([]);
+          setLoadingGroupData(false);
+          return;
         }
-      }
-    }
-    return { activeParticipants: active, thisWeekEntries: count, thisWeekTotal: total };
-  }, [participants, byParticipant]);
 
-  // ── Member-specific computations ──────────────────────────────────────
-  const memberParticipant = useMemo(
-    () => (currentUserRole === 'member' ? participants[0] ?? null : null),
-    [currentUserRole, participants]
-  );
+        let query = supabase.from('entries').select('*').eq('group_id', activeGroupId);
+        if (userIds.length > 0) {
+          query = query.or(`user_id.in.(${userIds.join(',')}),participant_id.in.(${allParticipantIds.join(',')})`);
+        } else {
+          query = query.in('participant_id', allParticipantIds);
+        }
 
-  const memberStats = useMemo(() => {
-    if (!memberParticipant) return null;
-    const target = memberParticipant.weekly_target_hizb || 7;
-    const weeklyDeltas = calculateWeeklyDeltas(entries, memberParticipant.id, memberParticipant.user_id);
+        const { data: eData } = await query.order('recorded_at', { ascending: false });
+        setAllGroupEntries(eData || []);
+
+        // Fetch global latest hizb + cycle for each user (cross-group)
+        if (userIds.length > 0) {
+          const { data: gData } = await supabase
+            .from('entries')
+            .select('user_id, value_int, cycle_number')
+            .in('user_id', userIds)
+            .neq('source', 'starting_point')
+            .order('recorded_at', { ascending: false });
+          const hizbMap: Record<string, number> = {};
+          const cycleMap: Record<string, number> = {};
+          gData?.forEach((e: any) => {
+            if (hizbMap[e.user_id] === undefined) {
+              hizbMap[e.user_id] = e.value_int;
+              cycleMap[e.user_id] = e.cycle_number ?? 0;
+            }
+          });
+          setGlobalHizbByUser(hizbMap);
+          setGlobalCycleByUser(cycleMap);
+        }
+
+        setLoadingGroupData(false);
+      });
+  }, [analyticsMode, activeGroupId]);
+
+  // ── My participant (for personal mode) ────────────────────────────────────
+  const myParticipant = useMemo(() => {
+    // Try to find user's own participant by user_id
+    const byUserId = participants.find(p => p.user_id === user?.id && p.active);
+    if (byUserId) return byUserId;
+    // For members, fallback to first participant (legacy)
+    if (currentUserRole === 'member' && participants.length > 0) return participants[0];
+    return null;
+  }, [participants, user, currentUserRole]);
+
+  // ── My stats (personal mode) ──────────────────────────────────────────────
+  const myStats = useMemo(() => {
+    if (!myParticipant) return null;
+    const target = myParticipant.weekly_target_hizb || 7;
+    const weeklyDeltas = calculateWeeklyDeltas(entries, myParticipant.id, myParticipant.user_id);
     const totalHizb = weeklyDeltas.reduce((s, w) => s + w.delta, 0);
     const khatmas = Math.floor(totalHizb / 60);
     const progressInCycle = totalHizb % 60;
@@ -391,7 +160,7 @@ export default function AnalyticsPage() {
       else break;
     }
 
-    const hizbRetard = calculateHizbRetard(entries, memberParticipant.id, target, memberParticipant.user_id);
+    const hizbRetard = calculateHizbRetard(entries, myParticipant.id, target, myParticipant.user_id);
 
     let prediction: string | null = null;
     if (weeklyAverage > 0) {
@@ -403,11 +172,11 @@ export default function AnalyticsPage() {
     }
 
     return { khatmas, progressInCycle, weeklyAverage, bestVal, currentStreak, hizbRetard, prediction, target };
-  }, [memberParticipant, entries]);
+  }, [myParticipant, entries]);
 
-  const memberChartData = useMemo(() => {
-    if (!memberParticipant) return [];
-    const weeklyDeltas = calculateWeeklyDeltas(entries, memberParticipant.id, memberParticipant.user_id);
+  const myChartData = useMemo(() => {
+    if (!myParticipant) return [];
+    const weeklyDeltas = calculateWeeklyDeltas(entries, myParticipant.id, myParticipant.user_id);
     const deltaMap = new Map(weeklyDeltas.map(w => [w.week, w.delta]));
     const now = new Date();
     const weeks = [];
@@ -423,1000 +192,346 @@ export default function AnalyticsPage() {
       });
     }
     return weeks;
-  }, [memberParticipant, entries]);
-  // ───────────────────────────────────────────────────────────────────────
+  }, [myParticipant, entries]);
 
-  // export CSV (classement mensuel)
-  const exportCSV = () => {
-    const data = monthlyData.map(item => ({
-      participant: item.name,
-      average: item.average,
-      total: item.total,
-      weeks: item.weeks
-    }));
-    const csv = toCSV(data, ['participant', 'average', 'total', 'weeks']);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `analytics-${selectedMonth}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
+  // ── Group stats (group mode) — uses directly-loaded data ─────────────────
+  const groupStats = useMemo(() => {
+    const currentWeekNum = getWeekKeyTuesday(new Date()).split('-W')[1]?.replace('-TUE', '') || '';
+    const prevDate = new Date(); prevDate.setDate(prevDate.getDate() - 7);
+    const prevWeekNum = getWeekKeyTuesday(prevDate).split('-W')[1]?.replace('-TUE', '') || '';
 
-  const colors = ['#059669', '#0891b2', '#7c3aed', '#dc2626', '#ea580c', '#ca8a04', '#0ea5e9', '#16a34a'];
+    return allGroupParticipants.map(participant => {
+      const target = participant.weekly_target_hizb || 7;
+      const weeklyDeltas = calculateWeeklyDeltas(allGroupEntries, participant.id, participant.user_id);
+      const last8 = weeklyDeltas.slice(-8);
 
-  /* ── Member view ─────────────────────────────────────────────────── */
-  if (currentUserRole === 'member') {
-    if (isLoading) {
-      return (
-        <div className="max-w-sm mx-auto px-4 pt-4 pb-12 flex flex-col gap-8">
-          <Skeleton className="h-16 w-48 rounded-2xl" />
-          <div className="grid grid-cols-2 gap-3">
-            {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}
-          </div>
-          <Skeleton className="h-2 rounded-full" />
-          <Skeleton className="h-40 rounded-2xl" />
-        </div>
-      );
-    }
+      // Current position: use latest non-starting_point entry directly (not cumulative)
+      const latestGroupEntry = allGroupEntries
+        .filter(e => e.participant_id === participant.id || (participant.user_id && e.user_id === participant.user_id))
+        .filter(e => e.source !== 'starting_point')
+        .sort((a: any, b: any) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime())[0];
+      const currentHizb = latestGroupEntry?.value_int ?? 0;
+      const currentCycle = latestGroupEntry?.cycle_number ?? 0;
+      const weeklyAverage = last8.length
+        ? Math.round((last8.reduce((s, w) => s + w.delta, 0) / last8.length) * 10) / 10
+        : 0;
+      let currentStreak = 0;
+      for (let i = weeklyDeltas.length - 1; i >= 0; i--) {
+        if (weeklyDeltas[i].delta >= target) currentStreak++;
+        else break;
+      }
+      const hizbRetard = calculateHizbRetard(allGroupEntries, participant.id, target, participant.user_id);
+      const weekDelta = weeklyDeltas.find(w => w.week === currentWeekNum)?.delta ?? 0;
+      const prevWeekDelta = weeklyDeltas.find(w => w.week === prevWeekNum)?.delta ?? 0;
+      return { participant, currentHizb, currentCycle, weeklyAverage, currentStreak, hizbRetard, target, weekDelta, prevWeekDelta };
+    }).sort((a, b) => b.weeklyAverage - a.weeklyAverage);
+  }, [allGroupParticipants, allGroupEntries]);
 
-    if (!memberParticipant || !memberStats) {
-      return (
-        <div className="flex flex-col items-center justify-center min-h-[50vh] text-center px-6">
-          <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4 text-2xl">📊</div>
-          <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Aucune donnée</h3>
-          <p className="text-sm text-slate-500 dark:text-slate-400 max-w-xs">Ajoutez des entrées pour voir vos statistiques.</p>
-        </div>
-      );
-    }
-
-    const { khatmas, progressInCycle, weeklyAverage, bestVal, currentStreak, hizbRetard, prediction, target } = memberStats;
-
+  // ── No group state ────────────────────────────────────────────────────────
+  if (!activeGroupId) {
     return (
-      <div className="max-w-sm mx-auto px-4 pt-4 pb-12 flex flex-col gap-8">
-
-        {/* Header */}
-        <div>
-          <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">Mes statistiques</p>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white leading-tight">{memberParticipant.name}</h1>
-          <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">
-            {khatmas} khatma{khatmas > 1 ? 's' : ''} · objectif {target} {currentUnit}/sem
-          </p>
+      <div className="flex flex-col items-center py-16 text-center px-6">
+        <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4 text-slate-400">
+          <BarChart3 className="w-7 h-7" />
         </div>
-
-        {/* KPI 2×2 */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-slate-100 dark:bg-slate-800 rounded-2xl p-4">
-            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">Moyenne (8 sem)</p>
-            <p className="text-3xl font-bold text-slate-900 dark:text-white">{weeklyAverage}</p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">hizb/sem</p>
-          </div>
-          <div className="bg-slate-100 dark:bg-slate-800 rounded-2xl p-4">
-            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">Record hebdo</p>
-            <p className="text-3xl font-bold text-slate-900 dark:text-white">{bestVal}</p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">hizb</p>
-          </div>
-          <div className="bg-slate-100 dark:bg-slate-800 rounded-2xl p-4">
-            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">Série actuelle</p>
-            <p className="text-3xl font-bold text-slate-900 dark:text-white">
-              {currentStreak > 0 ? currentStreak : '—'}
-            </p>
-            {currentStreak > 0 && <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">sem 🔥</p>}
-          </div>
-          <div className={`rounded-2xl p-4 ${
-            hizbRetard.status === 'retard'
-              ? 'bg-rose-50 dark:bg-rose-900/20'
-              : hizbRetard.status === 'avance'
-              ? 'bg-blue-50 dark:bg-blue-900/20'
-              : 'bg-emerald-50 dark:bg-emerald-900/20'
-          }`}>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">Statut</p>
-            <p className={`text-3xl font-bold ${
-              hizbRetard.status === 'retard'
-                ? 'text-rose-600 dark:text-rose-400'
-                : hizbRetard.status === 'avance'
-                ? 'text-blue-600 dark:text-blue-400'
-                : 'text-emerald-600 dark:text-emerald-400'
-            }`}>
-              {hizbRetard.status === 'retard'
-                ? `-${hizbRetard.retard}`
-                : hizbRetard.status === 'avance'
-                ? `+${hizbRetard.retard}`
-                : '✓'}
-            </p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-              {hizbRetard.status === 'retard'
-                ? 'hizb de retard'
-                : hizbRetard.status === 'avance'
-                ? "hizb d'avance"
-                : 'À jour'}
-            </p>
-          </div>
-        </div>
-
-        {/* Progress cycle */}
-        <div className="space-y-1.5">
-          <div className="flex justify-between text-xs text-slate-400 dark:text-slate-500">
-            <span>Cycle en cours · hizb {progressInCycle} / 60</span>
-            <span>{Math.round(progressInCycle / 60 * 100)}%</span>
-          </div>
-          <div className="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-emerald-500 rounded-full transition-all duration-300"
-              style={{ width: `${Math.max(2, progressInCycle / 60 * 100)}%` }}
-            />
-          </div>
-          {prediction && (
-            <p className="text-xs text-slate-400 dark:text-slate-500 pt-0.5">
-              Khatma estimée le{' '}
-              <span className="text-purple-600 dark:text-purple-400 font-medium">{prediction}</span>
-            </p>
-          )}
-        </div>
-
-        {/* Weekly chart */}
-        <div>
-          <p className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4">
-            8 dernières semaines
-          </p>
-          <div className="h-44">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={memberChartData} margin={{ top: 4, right: 0, left: -24, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 9, fill: '#94a3b8' }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: '#94a3b8' }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <ReferenceLine
-                  y={target}
-                  stroke="#10b981"
-                  strokeDasharray="4 4"
-                  strokeWidth={1.5}
-                />
-                <Tooltip
-                  formatter={(v: any) => [`${v} hizb`, 'Lecture']}
-                  contentStyle={{
-                    background: 'rgba(15,23,42,0.92)',
-                    border: 'none',
-                    borderRadius: '12px',
-                    color: '#f1f5f9',
-                    fontSize: 12,
-                    padding: '8px 12px'
-                  }}
-                  cursor={{ fill: 'rgba(16,185,129,0.08)' }}
-                  labelStyle={{ color: '#94a3b8', fontSize: 10 }}
-                />
-                <Bar dataKey="value" fill="#059669" radius={[4, 4, 0, 0]} maxBarSize={28} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <p className="text-[10px] text-slate-400 dark:text-slate-500 text-center mt-1">
-            — objectif {target} hizb/sem
-          </p>
-        </div>
-
+        <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Pas encore de groupe</h3>
+        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-xs">
+          Rejoignez ou créez un groupe pour accéder aux statistiques.
+        </p>
       </div>
     );
   }
-  /* ──────────────────────────────────────────────────────────────────── */
+
+  // ── Loading ───────────────────────────────────────────────────────────────
+  if (isLoading) {
+    return (
+      <div className="max-w-sm mx-auto px-4 pt-4 pb-12 flex flex-col gap-6">
+        <Skeleton className="h-10 w-48 rounded-2xl" />
+        <div className="grid grid-cols-2 gap-3">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}
+        </div>
+        <Skeleton className="h-2 rounded-full" />
+        <Skeleton className="h-40 rounded-2xl" />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div className="max-w-lg mx-auto pb-12 flex flex-col gap-6">
+
+      {/* Header + toggle */}
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Analytics</h1>
-          <p className="text-gray-600 dark:text-gray-400">
-            Analyse détaillée des progressions en {currentUnit}
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Stats</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+            {analyticsMode === 'personal' ? 'Ma progression' : 'Statistiques du groupe'}
           </p>
         </div>
-
-        <div className="flex flex-col sm:flex-row gap-2">
-          <button onClick={exportCSV} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
-            <Download className="h-4 w-4 mr-2" />
-            Export CSV
+        <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
+          <button
+            onClick={() => setAnalyticsMode('personal')}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+              analyticsMode === 'personal'
+                ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Moi
+          </button>
+          <button
+            onClick={() => setAnalyticsMode('group')}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+              analyticsMode === 'group'
+                ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Groupe
           </button>
         </div>
       </div>
 
-      {/* Sélection participants */}
-      <div className="glass-panel rounded-2xl p-6 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center">
-            <Users className="h-5 w-5 text-emerald-600 dark:text-emerald-400 mr-2" />
-            Sélection des participants
-          </h2>
-          <div className="flex gap-2">
-            <button onClick={handleSelectAll} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm font-medium shadow-sm hover:shadow-md">
-              Tout sélectionner
-            </button>
-            <button onClick={handleResetAll} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors text-sm font-medium">
-              Tout désélectionner
-            </button>
-          </div>
-        </div>
+      {/* ── Personal mode ── */}
+      {analyticsMode === 'personal' && (() => {
+        const thisWeekDelta = myChartData[myChartData.length - 1]?.value ?? 0;
+        const prevWeekDelta = myChartData[myChartData.length - 2]?.value ?? 0;
+        const deltaVsPrev = thisWeekDelta - prevWeekDelta;
 
-        <div className="flex flex-wrap gap-2">
-          {participants.filter(p => p.active).map(p => (
-            <button
-              key={p.id}
-              onClick={() => toggleParticipant(p.id)}
-              className={`px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
-                selectedParticipantIds.includes(p.id)
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/20 transform scale-105'
-                  : 'bg-slate-100 dark:bg-slate-800/50 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
-              }`}
-            >
-              {p.name}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-4 text-xs font-medium text-slate-500 dark:text-slate-400 flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-          {selectedParticipantIds.length} participant(s) sélectionné(s) sur {participants.filter(p => p.active).length}
-        </div>
-      </div>
-
-      {/* Tableau hebdo (timeline/heatmap/table) */}
-      <div className="glass-panel rounded-2xl p-6 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-          <div className="flex items-center gap-3">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <div className="p-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
-                <BarChart3 className="h-4 w-4" />
-              </div>
-              Évolution par semaine
-            </h2>
-            <button
-              onClick={() => setShowWeeklyTable(!showWeeklyTable)}
-              className="flex items-center px-3 py-1.5 bg-slate-100 dark:bg-slate-800/50 text-slate-600 dark:text-slate-400 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-xs font-medium"
-            >
-              {showWeeklyTable ? <EyeOff className="h-3.5 w-3.5 mr-1.5" /> : <Eye className="h-3.5 w-3.5 mr-1.5" />}
-              {showWeeklyTable ? 'Masquer' : 'Afficher'}
-            </button>
-          </div>
-          <div className="flex items-center gap-3">
-            <label className="text-sm font-medium text-slate-600 dark:text-slate-400">Période:</label>
-            <select
-              value={weeklyPeriod}
-              onChange={(e) => setWeeklyPeriod(Number(e.target.value) as any)}
-              className="bg-slate-50 dark:bg-slate-800 border-none rounded-lg px-3 py-1.5 text-sm font-medium focus:ring-2 focus:ring-emerald-500 text-slate-900 dark:text-white"
-            >
-              <option value={4}>4 semaines</option>
-              <option value={6}>6 semaines</option>
-              <option value={8}>8 semaines</option>
-              <option value={12}>12 semaines</option>
-              <option value={16}>16 semaines</option>
-            </select>
-          </div>
-        </div>
-
-        {isLoading ? (
-          <div className="space-y-4">
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="flex gap-4">
-                <Skeleton className="h-12 w-44" />
-                <Skeleton className="h-12 flex-1" />
-              </div>
-            ))}
-          </div>
-        ) : showWeeklyTable && (
+        return (
           <>
-            {/* Heatmap colorée avec tendances */}
-            <div className="mb-8">
-              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                <div className="flex flex-wrap items-center gap-3 text-xs font-medium">
-                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-emerald-500 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Objectif atteint</span></div>
-                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-amber-400 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Moyen</span></div>
-                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-500 rounded-sm" /><span className="text-slate-600 dark:text-slate-400">Faible</span></div>
-                </div>
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 sm:hidden flex items-center gap-1">← Glisser →</span>
-              </div>
-
-              <div className="overflow-x-auto pb-2">
-                <div className="inline-block min-w-full">
-                  <div className="flex mb-3 bg-slate-50/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-xl p-2 border border-slate-100 dark:border-slate-700/50 sticky top-0 z-10">
-                    <div className="w-44 p-2 font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">Participant</div>
-                    <div className="w-16 p-2 text-center font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">Obj.</div>
-                    {weeklyTableData[0]?.weeks.map((w: any) => (
-                      <div key={w.weekKey} className="w-16 p-2 text-center font-bold text-xs text-slate-500 dark:text-slate-400">
-                        <div className="text-emerald-600 dark:text-emerald-400">W{w.weekKey.split('-W')[1]?.replace('-TUE', '')}</div>
-                        <div className="text-[10px] font-normal opacity-70">{w.date.split('/')[0]}/{w.date.split('/')[1]}</div>
-                      </div>
-                    ))}
-                    <div className="w-16 p-2 text-center font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">Moy.</div>
-                    <div className="w-24 p-2 text-center font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">Retard</div>
-                  </div>
-
-                  {weeklyTableData.map(({ participant, data, weeks }) => (
-                    <div key={participant.id} className="flex mb-2 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 rounded-xl p-1 transition-all duration-200 group">
-                      <div className="w-44 p-2 font-bold text-sm text-slate-900 dark:text-white truncate flex items-center">
-                        <div className="w-8 h-8 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-300 text-xs font-bold mr-3 shadow-sm">
-                          {participant.name.charAt(0)}
-                        </div>
-                        {participant.name}
-                      </div>
-                      <div className="w-16 p-2 flex items-center justify-center">
-                        <div className="text-center text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg px-2 py-1 font-bold">
-                        {data.target}
-                        </div>
-                      </div>
-                      {weeks.map((w: any) => {
-                        const value = data[w.date] || 0;
-                        const cls =
-                          value >= data.target ? 'bg-emerald-500 text-white shadow-emerald-500/30' :
-                          value >= data.target * 0.5 ? 'bg-amber-400 text-white shadow-amber-400/30' : 'bg-rose-500 text-white shadow-rose-500/30';
-                        return (
-                          <div key={w.weekKey} className="w-16 p-1 flex items-center justify-center">
-                            <div className={`${cls} w-full rounded-lg text-center text-xs font-bold py-1.5 relative group/tooltip shadow-md transition-all hover:scale-110`}>
-                              {value}
-                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-xl opacity-0 group-hover/tooltip:opacity-100 transition-opacity whitespace-nowrap z-20 shadow-xl pointer-events-none">
-                                <div className="font-bold">{w.date}</div>
-                                <div className="flex items-center gap-1 mt-1">
-                                  {value} hizb 
-                                  {value >= data.target ? '✨' : value >= data.target * 0.5 ? '⚠️' : '🚨'}
-                                </div>
-                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"></div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                      <div className="w-16 p-2 text-center text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-center">
-                        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 shadow-sm">
-                          {(weeks.reduce((s: number, w: any) => s + (data[w.date] || 0), 0) / Math.max(1, weeks.length)).toFixed(1)}
-                        </div>
-                      </div>
-                      <div className="w-24 p-2 text-center text-xs flex items-center justify-center">
-                        {(() => {
-                          const target = data.target || 7;
-                          const values = weeks.map((w: any) => data[w.date] || 0);
-                          const totalActual = values.reduce((sum: number, val: number) => sum + val, 0);
-                          const totalExpected = target * weeks.length;
-                          const difference = totalActual - totalExpected;
-                          
-                          if (difference > 0) {
-                            return <span className="text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-lg">+{difference}</span>;
-                          } else if (difference < 0) {
-                            return <span className="text-rose-600 dark:text-rose-400 font-bold bg-rose-50 dark:bg-rose-900/20 px-2 py-1 rounded-lg">{difference}</span>;
-                          } else {
-                            return <span className="text-slate-400 font-bold">—</span>;
-                          }
-                        })()}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Moyennes mensuelles */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-          <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">📊 Moyennes mensuelles</h2>
-            <button
-              onClick={() => setShowMonthlyTable(!showMonthlyTable)}
-              className="flex items-center px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
-            >
-              {showMonthlyTable ? <EyeOff className="h-4 w-4 mr-1" /> : <Eye className="h-4 w-4 mr-1" />}
-              {showMonthlyTable ? 'Masquer' : 'Afficher'}
-            </button>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">De:</label>
-              <input
-                type="month"
-                value={monthlyFromDate}
-                onChange={(e) => setMonthlyFromDate(e.target.value)}
-                className="border border-gray-300 dark:border-gray-600 rounded-md px-3 py-1 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">À:</label>
-              <input
-                type="month"
-                value={monthlyToDate}
-                onChange={(e) => setMonthlyToDate(e.target.value)}
-                className="border border-gray-300 dark:border-gray-600 rounded-md px-3 py-1 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-              />
-            </div>
-          </div>
-        </div>
-
-        {isLoading ? (
-          <div className="space-y-4">
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="flex gap-4">
-                <Skeleton className="h-10 w-40" />
-                <Skeleton className="h-10 flex-1" />
-              </div>
-            ))}
-          </div>
-        ) : showMonthlyTable && (
-          <>
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-              <div className="flex flex-wrap items-center gap-3 text-sm">
-                <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Objectif atteint</span></div>
-                <div className="flex items-center gap-2"><div className="w-4 h-4 bg-yellow-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Progression moyenne</span></div>
-                <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 rounded" /><span className="text-gray-600 dark:text-gray-400">Faible progression</span></div>
-              </div>
-              <span className="text-[10px] text-gray-400 dark:text-gray-500 sm:hidden">← Glisser →</span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <div className="inline-block min-w-full">
-                <div className="flex mb-3 bg-gray-50 dark:bg-gray-900 rounded-lg p-2">
-                  <div className="w-40 p-2 font-semibold text-gray-900 dark:text-white">Participant</div>
-                  <div className="w-16 p-2 text-center font-semibold text-gray-900 dark:text-white text-xs">Obj.</div>
-                  {monthlyTableData[0]?.months.map((month: string) => {
-                    const [y, m] = month.split('-').map(Number);
-                    const monthName = new Date(y, m - 1).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
-                    return (
-                      <div key={month} className="w-16 p-2 text-center font-semibold text-gray-900 dark:text-white text-xs">
-                        {monthName}
-                      </div>
-                    );
-                  })}
-                  <div className="w-24 p-2 text-center font-semibold text-gray-900 dark:text-white text-xs">Hizb en retard</div>
-                </div>
-
-                {monthlyTableData.map(({ participant, data, months }) => (
-                  <div key={participant.id} className="flex mb-2 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg p-1 transition-colors">
-                    <div className="w-40 p-2 font-medium text-gray-900 dark:text-white truncate flex items-center">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-r from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold mr-3">
-                        {participant.name.charAt(0)}
-                      </div>
-                      {participant.name}
-                    </div>
-                    <div className="w-16 p-2 text-center text-xs bg-blue-100 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 rounded-md flex items-center justify-center font-semibold">
-                      {data.target}
-                    </div>
-                    {months.map((month: string) => {
-                      const value = data[month] || 0;
-                      const cls =
-                        value >= data.target ? 'bg-green-500 text-white' :
-                        value >= data.target * 0.5 ? 'bg-yellow-500 text-white' : 'bg-red-500 text-white';
-                      return (
-                        <div key={month} className="w-16 p-1">
-                          <div className={`${cls} rounded-lg text-center text-xs font-bold py-2 relative group shadow-sm hover:shadow-md transition-shadow`}>
-                            {value.toFixed(1)}
-                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 shadow-lg">
-                              <div className="font-semibold">{new Date(parseInt(month.split('-')[0]), parseInt(month.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}</div>
-                              <div>{value.toFixed(1)} hizb/sem {value >= data.target ? '🟢' : value >= data.target * 0.5 ? '🟡' : '🔴'}</div>
-                              <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    <div className="w-24 p-2 text-center text-xs flex items-center justify-center">
-                      {(() => {
-                        const target = data.target || 7;
-                        const values = months.map((m: string) => data[m] || 0);
-                        // Calculate total hizb en retard: (average - target) × 4.33 weeks per month × number of months
-                        // Simplified: sum of (monthly_avg - target) × 4.33 for each month
-                        const weeksPerMonth = 4.33; // Average weeks per month
-                        const totalDifference = values.reduce((sum: number, monthlyAvg: number) => {
-                          return sum + ((monthlyAvg - target) * weeksPerMonth);
-                        }, 0);
-                        const roundedDifference = Math.round(totalDifference);
-                        
-                        if (roundedDifference > 0) {
-                          return <span className="text-green-600 dark:text-green-400 font-semibold">+{roundedDifference}</span>;
-                        } else if (roundedDifference < 0) {
-                          return <span className="text-red-600 dark:text-red-400 font-semibold">{roundedDifference}</span>;
-                        } else {
-                          return <span className="text-gray-600 dark:text-gray-400 font-semibold">0</span>;
-                        }
-                      })()}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Analyse mensuelle (graph classement) */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-          <div className="flex items-center">
-            <BarChart3 className="h-5 w-5 text-emerald-600 dark:text-emerald-400 mr-2" />
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Analyse mensuelle</h2>
-          </div>
-          <div className="flex items-center">
-            <input
-              type="checkbox"
-              id="comparison-month"
-              checked={comparisonMode}
-              onChange={(e) => setComparisonMode(e.target.checked)}
-              className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 border-gray-300 rounded mr-2"
-            />
-            <label htmlFor="comparison-month" className="text-sm text-gray-700 dark:text-gray-300">Mode comparaison</label>
-          </div>
-        </div>
-
-        <p className="text-gray-600 dark:text-gray-400 mb-4">Moyenne hebdomadaire de lecture par participant</p>
-
-        <div className="mb-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                {comparisonMode ? 'Mois 1 (principal)' : 'Mois à analyser'}
-              </label>
-          <select
-            value={selectedMonth}
-                onChange={(e) => {
-                  setSelectedMonth(e.target.value);
-                  // Reset comparison month if it's the same as selected month
-                  if (e.target.value === comparisonMonth) {
-                    setComparisonMonth('');
-                  }
-                }}
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-          >
-            {availableMonths.map(m => {
-              const [y, mNum] = m.split('-').map(Number);
-              const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-              return <option key={m} value={m}>{monthName}</option>;
-            })}
-          </select>
-        </div>
-
-            {comparisonMode && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Mois 2 (comparaison)</label>
-                <select
-                  value={comparisonMonth || ''}
-                  onChange={(e) => setComparisonMonth(e.target.value)}
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-                >
-                  <option value="">Sélectionner un mois</option>
-                  {availableMonths
-                    .filter(m => m !== selectedMonth)
-                    .map(m => {
-                      const [y, mNum] = m.split('-').map(Number);
-                      const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-                      return <option key={m} value={m}>{monthName}</option>;
-                    })}
-                </select>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {isLoading ? (
-          <div className="h-80 w-full">
-            <Skeleton className="h-full w-full rounded-lg" />
-          </div>
-        ) : monthlyData.length === 0 ? (
-          <div className="text-center py-8">
-            <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-600 dark:text-gray-400">Aucune donnée disponible pour ce mois</p>
-          </div>
-        ) : (
-          <div className="h-64 sm:h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={monthlyData} margin={{ top: 10, right: isMobile ? 10 : 30, left: isMobile ? 0 : 20, bottom: isMobile ? 40 : 60 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" angle={-40} textAnchor="end" height={isMobile ? 50 : 80} interval={0} tick={{ fontSize: isMobile ? 10 : 12 }} />
-                <YAxis width={isMobile ? 30 : 50} label={isMobile ? undefined : { value: 'Hizb/semaine', angle: -90, position: 'insideLeft' }} tick={{ fontSize: isMobile ? 10 : 12 }} />
-                <ReferenceLine y={7} stroke="red" strokeDasharray="4 4" label={isMobile ? undefined : "7"} />
-                <ReferenceLine y={14} stroke="red" strokeDasharray="4 4" label={isMobile ? undefined : "14"} />
-                <Tooltip
-                  formatter={(value: any, name: any) => {
-                    if (comparisonMode && comparisonMonth) {
-                      return [`${value} hizb/semaine`, name];
-                    }
-                    return [`${value} hizb/semaine`, 'Moyenne'];
-                  }}
-                  labelStyle={{ color: '#374151' }}
-                  contentStyle={{ backgroundColor: '#f9fafb', border: '1px solid #d1d5db', borderRadius: '6px' }}
-                />
-                <Legend wrapperStyle={{ fontSize: isMobile ? '11px' : '12px' }} />
-                <Bar
-                  dataKey="average"
-                  fill="#059669"
-                  radius={[4, 4, 0, 0]}
-                  name={comparisonMode && comparisonMonth
-                    ? `${new Date(parseInt(selectedMonth.split('-')[0]), parseInt(selectedMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })}`
-                    : "Moyenne hebdomadaire"
-                  }
-                />
-                {comparisonMode && comparisonMonth && (
-                  <Bar
-                    dataKey="comparisonAverage"
-                    fill="#0891b2"
-                    radius={[4, 4, 0, 0]}
-                    name={`${new Date(parseInt(comparisonMonth.split('-')[0]), parseInt(comparisonMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })}`}
-                  />
-                )}
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </div>
-
-      {/* Lectures hebdomadaires (graph multi-séries) */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-          <div className="flex items-center">
-            <Calendar className="h-5 w-5 text-blue-600 dark:text-blue-400 mr-2" />
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Lectures hebdomadaires</h2>
-          </div>
-          <div className="flex items-center">
-            <input
-              type="checkbox"
-              id="comparison-weeks"
-              checked={comparisonMode}
-              onChange={(e) => setComparisonMode(e.target.checked)}
-              className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 border-gray-300 rounded mr-2"
-            />
-            <label htmlFor="comparison-weeks" className="text-sm text-gray-700 dark:text-gray-300">Mode comparaison</label>
-          </div>
-        </div>
-
-        <div className="mb-4">
-          <p className="text-gray-600 dark:text-gray-400 mb-2">Progression par semaine pour le mois sélectionné</p>
-          <div className="flex flex-col sm:flex-row gap-4">
-            {/* Mode selector */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Mode d'affichage</label>
-              <div className="flex border border-gray-300 dark:border-gray-600 rounded-md overflow-hidden">
-                <button
-                  onClick={() => setWeeklyReadingsMode('month')}
-                  className={`px-3 py-2 text-sm ${
-                    weeklyReadingsMode === 'month'
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  Par mois
-                </button>
-                <button
-                  onClick={() => setWeeklyReadingsMode('weeks')}
-                  className={`px-3 py-2 text-sm ${
-                    weeklyReadingsMode === 'weeks'
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  Par semaines
-                </button>
-              </div>
-            </div>
-
-            {/* Contrôles conditionnels */}
-            {weeklyReadingsMode === 'month' ? (
-              <div className={comparisonMode ? 'grid grid-cols-1 md:grid-cols-2 gap-4 w-full' : ''}>
-              <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    {comparisonMode ? 'Mois 1 (principal)' : 'Mois à analyser'}
-                  </label>
-                <select
-                  value={selectedMonth}
-                    onChange={(e) => {
-                      setSelectedMonth(e.target.value);
-                      // Reset comparison month if it's the same as selected month
-                      if (e.target.value === comparisonMonth) {
-                        setComparisonMonth('');
-                      }
-                    }}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-                >
-                  {availableMonths.map(m => {
-                    const [y, mNum] = m.split('-').map(Number);
-                    const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-                    return <option key={m} value={m}>{monthName}</option>;
-                  })}
-                </select>
-                </div>
-                {comparisonMode && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Mois 2 (comparaison)</label>
-                    <select
-                      value={comparisonMonth || ''}
-                      onChange={(e) => setComparisonMonth(e.target.value)}
-                      className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-                    >
-                      <option value="">Sélectionner un mois</option>
-                      {availableMonths
-                        .filter(m => m !== selectedMonth)
-                        .map(m => {
-                          const [y, mNum] = m.split('-').map(Number);
-                          const monthName = new Date(y, mNum - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-                          return <option key={m} value={m}>{monthName}</option>;
-                        })}
-                    </select>
-                  </div>
-                )}
+            {!myParticipant || !myStats ? (
+              <div className="flex flex-col items-center py-12 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4 text-2xl">📊</div>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Aucune donnée</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 max-w-xs">
+                  Ajoutez des entrées pour voir vos statistiques.
+                </p>
               </div>
             ) : (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Nombre de semaines</label>
-                <select
-                  value={weeklyReadingsPeriod}
-                  onChange={(e) => setWeeklyReadingsPeriod(Number(e.target.value) as any)}
-                  className="border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 dark:bg-gray-700 dark:text-white"
-                >
-                  <option value={2}>2 dernières semaines</option>
-                  <option value={4}>4 dernières semaines</option>
-                  <option value={8}>8 dernières semaines</option>
-                  <option value={12}>12 dernières semaines</option>
-                </select>
-              </div>
+              <>
+                {/* Hero: current position */}
+                <div className="bg-emerald-600 dark:bg-emerald-700 rounded-3xl p-6 text-white">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-widest text-emerald-200">
+                        Hizb actuel
+                      </p>
+                      <p className="text-8xl font-black mt-1 leading-none tabular-nums">
+                        {globalCurrentHizb ?? myStats.progressInCycle}
+                      </p>
+                      <p className="text-sm text-emerald-200 mt-2">
+                        sur 60 · khatma n°{(globalCurrentCycle ?? myStats.khatmas) + 1}
+                      </p>
+                    </div>
+                    <div className="text-right flex-shrink-0 pt-1">
+                      <p className="text-xs text-emerald-200 font-medium">Cette semaine</p>
+                      <p className="text-5xl font-black mt-0.5 leading-none tabular-nums">
+                        {thisWeekDelta}
+                      </p>
+                      {prevWeekDelta > 0 && (
+                        <p className={`text-xs mt-1 font-semibold ${
+                          deltaVsPrev > 0 ? 'text-white' : deltaVsPrev < 0 ? 'text-rose-200' : 'text-emerald-200'
+                        }`}>
+                          {deltaVsPrev > 0 ? `↑ +${deltaVsPrev}` : deltaVsPrev < 0 ? `↓ ${deltaVsPrev}` : '='} vs S-1
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {/* Progress bar */}
+                  {(() => {
+                    const heroHizb = globalCurrentHizb ?? myStats.progressInCycle;
+                    return (
+                      <div className="mt-5 space-y-1.5">
+                        <div className="h-1.5 bg-white/20 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-white rounded-full transition-all"
+                            style={{ width: `${Math.max(2, heroHizb / 60 * 100)}%` }}
+                          />
+                        </div>
+                        <div className="flex justify-between text-xs text-emerald-200">
+                          <span>{Math.round(heroHizb / 60 * 100)}% du cycle en cours</span>
+                          {myStats.prediction && <span>khatma le {myStats.prediction}</span>}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* 3-col mini stats */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-slate-100 dark:bg-slate-800 rounded-2xl p-3 text-center">
+                    <p className="text-xl font-bold text-slate-900 dark:text-white tabular-nums">{myStats.weeklyAverage}</p>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">hizb/sem moy.</p>
+                  </div>
+                  <div className="bg-slate-100 dark:bg-slate-800 rounded-2xl p-3 text-center">
+                    <p className="text-xl font-bold text-slate-900 dark:text-white">
+                      {myStats.currentStreak > 0 ? `${myStats.currentStreak}🔥` : '—'}
+                    </p>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">série</p>
+                  </div>
+                  <div className={`rounded-2xl p-3 text-center ${
+                    myStats.hizbRetard.status === 'retard' ? 'bg-rose-50 dark:bg-rose-900/20' :
+                    myStats.hizbRetard.status === 'avance' ? 'bg-blue-50 dark:bg-blue-900/20' :
+                    'bg-emerald-50 dark:bg-emerald-900/20'
+                  }`}>
+                    <p className={`text-xl font-bold tabular-nums ${
+                      myStats.hizbRetard.status === 'retard' ? 'text-rose-600 dark:text-rose-400' :
+                      myStats.hizbRetard.status === 'avance' ? 'text-blue-600 dark:text-blue-400' :
+                      'text-emerald-600 dark:text-emerald-400'
+                    }`}>
+                      {myStats.hizbRetard.status === 'retard' ? `-${myStats.hizbRetard.retard}` :
+                       myStats.hizbRetard.status === 'avance' ? `+${myStats.hizbRetard.retard}` : '✓'}
+                    </p>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+                      {myStats.hizbRetard.status === 'retard' ? 'retard' :
+                       myStats.hizbRetard.status === 'avance' ? 'avance' : 'à jour'}
+                    </p>
+                  </div>
+                </div>
+
+              </>
             )}
-          </div>
+          </>
+        );
+      })()}
 
-          <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-            {weeklyReadingsMode === 'month'
-              ? comparisonMode && comparisonMonth
-                ? `Comparaison des semaines entre ${new Date(parseInt(selectedMonth.split('-')[0]), parseInt(selectedMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })} et ${new Date(parseInt(comparisonMonth.split('-')[0]), parseInt(comparisonMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`
-                : `Affichage des semaines du mois sélectionné`
-              : `Affichage des ${weeklyReadingsPeriod} dernières semaines`}
-          </div>
-        </div>
-
-        {isLoading ? (
-          <div className="h-80 w-full">
-            <Skeleton className="h-full w-full rounded-lg" />
-          </div>
-        ) : weeklyData.chartData?.length === 0 ? (
-          <div className="text-center py-8">
-            <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-600 dark:text-gray-400">Aucune donnée hebdomadaire disponible</p>
-          </div>
-        ) : (
-          <div className="h-64 sm:h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weeklyData.chartData} margin={{ top: 10, right: isMobile ? 10 : 30, left: isMobile ? 0 : 20, bottom: isMobile ? 40 : 60 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" angle={-40} textAnchor="end" height={isMobile ? 50 : 80} interval={0} tick={{ fontSize: isMobile ? 10 : 12 }} />
-                <YAxis width={isMobile ? 30 : 50} label={isMobile ? undefined : { value: 'Hizb', angle: -90, position: 'insideLeft' }} tick={{ fontSize: isMobile ? 10 : 12 }} />
-                {/* lignes d'objectif */}
-                <ReferenceLine y={7} stroke="red" strokeDasharray="4 4" label={isMobile ? undefined : "7"} />
-                <ReferenceLine y={14} stroke="red" strokeDasharray="4 4" label={isMobile ? undefined : "14"} />
-                <Tooltip
-                  formatter={(value: any, name: any) => [`${value} hizb`, `Semaine du ${name}`]}
-                  labelStyle={{ color: '#374151' }}
-                  contentStyle={{ backgroundColor: '#f9fafb', border: '1px solid #d1d5db', borderRadius: '6px' }}
-                />
-                <Legend wrapperStyle={{ fontSize: isMobile ? '11px' : '12px' }} />
-                {weeklyData.weeks?.map((w: any, index: number) => {
-                  const dataKey = w.monthLabel ? `${w.date}_${w.monthLabel}` : w.date;
-                  const monthName = w.monthLabel === 'comp' && comparisonMonth
-                    ? `${new Date(parseInt(comparisonMonth.split('-')[0]), parseInt(comparisonMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'short' })} ${w.date}`
-                    : !w.monthLabel && comparisonMode && comparisonMonth
-                    ? `${new Date(parseInt(selectedMonth.split('-')[0]), parseInt(selectedMonth.split('-')[1]) - 1).toLocaleDateString('fr-FR', { month: 'short' })} ${w.date}`
-                    : `Semaine du ${w.date}`;
-                  const barColor = w.monthLabel === 'comp' ? '#0891b2' : colors[index % colors.length];
-                  
-                  return (
-                  <Bar
-                    key={w.weekKey + (w.monthLabel || '')}
-                    dataKey={dataKey}
-                    fill={barColor}
-                    name={monthName}
-                    radius={[2, 2, 0, 0]}
-                  />
-                  );
-                })}
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </div>
-
-      {/* Analyse individuelle */}
-      <div className="glass-panel rounded-2xl p-6">
-        <div className="flex items-center mb-6">
-          <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg text-purple-600 dark:text-purple-400 mr-3">
-            <Users className="h-5 w-5" />
-          </div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white">Analyse individuelle</h2>
-        </div>
-
-        {isLoading ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="glass-panel rounded-2xl p-5 border border-slate-200 dark:border-slate-700">
-                <div className="flex items-center gap-3 mb-4">
-                  <Skeleton className="w-10 h-10 rounded-full" />
-                  <div className="space-y-2">
-                    <Skeleton className="h-5 w-32" />
-                    <Skeleton className="h-3 w-24" />
+      {/* ── Group mode — Ramadan-style leaderboard ── */}
+      {analyticsMode === 'group' && (
+        <>
+          {loadingGroupData ? (
+            <div className="space-y-3">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="bg-white dark:bg-slate-800/50 rounded-2xl p-5 border border-slate-100 dark:border-slate-700/50 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-700 animate-pulse" />
+                    <div className="flex-1 space-y-1.5">
+                      <div className="h-4 bg-slate-100 dark:bg-slate-700 rounded animate-pulse w-32" />
+                      <div className="h-3 bg-slate-100 dark:bg-slate-700 rounded animate-pulse w-24" />
+                    </div>
+                    <div className="h-10 w-12 bg-slate-100 dark:bg-slate-700 rounded animate-pulse" />
                   </div>
                 </div>
-                <div className="space-y-3">
-                  <Skeleton className="h-10 w-full rounded-lg" />
-                  <Skeleton className="h-10 w-full rounded-lg" />
-                  <Skeleton className="h-10 w-full rounded-lg" />
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-          {filteredParticipants.map((participant) => {
-            // cumul réel = somme des deltas (toutes semaines)
-            const weeklyDeltas = calculateWeeklyDeltas(entries, participant.id, participant.user_id);
-            const totalHizb = weeklyDeltas.reduce((sum, w) => sum + w.delta, 0);
-            const khatmas = Math.floor(totalHizb / 60);
-            const progressInCycle = totalHizb % 60;
-
-            // moyenne 8 sem
-            const last8Weeks = weeklyDeltas.slice(-8);
-            const weeklyTotal = last8Weeks.reduce((sum, w) => sum + w.delta, 0);
-            const weeklyAverage = last8Weeks.length ? Math.round((weeklyTotal / last8Weeks.length) * 10) / 10 : 0;
-
-            // best week
-            const bestWeek = weeklyDeltas.reduce((best, current) =>
-              current.delta > best.delta ? current : best,
-              { delta: 0, week: '' }
-            );
-            const bestVal = bestWeek.delta;
-            const bestDate = bestWeek.week ? `S${bestWeek.week}` : null;
-
-            // série actuelle (current streak)
-            const target = participant.weekly_target_hizb || 7;
-            let currentStreak = 0;
-            // Start from most recent week and count backwards
-            for (let i = weeklyDeltas.length - 1; i >= 0; i--) {
-              if (weeklyDeltas[i].delta >= target) {
-                currentStreak++;
-              } else {
-                break; // Stop at first week below target
-              }
-            }
-            const bestStreak = (() => {
-              let maxStreak = 0;
-              let tempStreak = 0;
-              for (const w of weeklyDeltas) {
-                if (w.delta >= target) {
-                  tempStreak++;
-                  maxStreak = Math.max(maxStreak, tempStreak);
-                } else {
-                  tempStreak = 0;
-                }
-              }
-              return maxStreak;
-            })();
-
-            // calcul hizb en retard
-            const hizbRetard = calculateHizbRetard(entries, participant.id, target, participant.user_id);
-
-            // prédiction (reste dans le cycle courant)
-            let prediction: string | null = null;
-            if (weeklyAverage > 0) {
-              const remaining = Math.max(0, 60 - progressInCycle);
-              const weeksRemaining = Math.ceil(remaining / weeklyAverage);
-              const completionDate = new Date();
-              completionDate.setDate(completionDate.getDate() + weeksRemaining * 7);
-              prediction = completionDate.toLocaleDateString('fr-FR');
-            }
-
-            return (
-              <div key={participant.id} className="bg-white dark:bg-slate-800/50 rounded-2xl p-5 border border-slate-200 dark:border-slate-700 hover:shadow-lg hover:border-emerald-200 dark:hover:border-emerald-800 transition-all duration-300 group">
-                <div className="mb-4 flex items-center gap-3 pb-3 border-b border-slate-100 dark:border-slate-700">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 font-bold shadow-sm">
-                    {participant.name.charAt(0)}
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-slate-900 dark:text-white text-lg">{participant.name}</h3>
-                    <div className="text-xs text-slate-500 dark:text-slate-400">Obj: {target} hizb/sem</div>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  {/* Progression */}
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-900/50">
-                    <div className="flex items-center">
-                      <Target className="h-4 w-4 text-blue-500 mr-2" />
-                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Total</span>
+              ))}
+            </div>
+          ) : groupStats.length === 0 ? (
+            <div className="flex flex-col items-center py-12 text-center">
+              <Users className="w-10 h-10 text-slate-300 dark:text-slate-600 mb-3" />
+              <p className="text-sm text-slate-500 dark:text-slate-400">Aucun participant actif</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {groupStats.map(({ participant, currentHizb, currentCycle, weeklyAverage, currentStreak, hizbRetard, target, weekDelta, prevWeekDelta }, index) => {
+                const rank = index + 1;
+                const badge = rankBadge(rank);
+                const isMe = participant.user_id === user?.id;
+                const deltaVsPrev = weekDelta - prevWeekDelta;
+                // For users with accounts: use global latest (cross-group); for ghosts: use per-group latest entry
+                const heroHizb = (participant.user_id && globalHizbByUser[participant.user_id] !== undefined)
+                  ? globalHizbByUser[participant.user_id]
+                  : currentHizb;
+                const heroKhatma = (participant.user_id && globalCycleByUser[participant.user_id] !== undefined)
+                  ? globalCycleByUser[participant.user_id]
+                  : currentCycle;
+                return (
+                  <div
+                    key={participant.id}
+                    className={`bg-white dark:bg-slate-800/50 rounded-2xl p-4 border transition-all ${
+                      isMe
+                        ? 'border-emerald-300 dark:border-emerald-700 shadow-md shadow-emerald-500/10'
+                        : 'border-slate-100 dark:border-slate-700/50'
+                    }`}
+                  >
+                    {/* Row 1: rank + name + current hizb + this week */}
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold flex-shrink-0 ${badge.bg} ${badge.text}`}>
+                        {badge.label}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <p className="font-bold text-slate-900 dark:text-white truncate text-sm">{participant.name}</p>
+                          {isMe && (
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded-md flex-shrink-0">
+                              vous
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+                          khatma n°{heroKhatma + 1} · obj {target} hizb/sem
+                        </p>
+                      </div>
+                      {/* Focal numbers: current hizb + this week */}
+                      <div className="text-right flex-shrink-0">
+                        <div className="flex items-baseline gap-1 justify-end">
+                          <p className="text-3xl font-black text-slate-900 dark:text-white tabular-nums leading-none">{heroHizb}</p>
+                          <div className="text-[10px] text-slate-400 dark:text-slate-500 text-left leading-tight">
+                            <p>hizb</p>
+                            <p>actuel</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-end gap-1 mt-0.5">
+                          <p className={`text-xs font-semibold tabular-nums ${weekDelta > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-300 dark:text-slate-600'}`}>
+                            {weekDelta > 0 ? `+${weekDelta}` : '—'} sem.
+                          </p>
+                          {prevWeekDelta > 0 && weekDelta > 0 && (
+                            <span className={`text-[10px] font-bold leading-none ${deltaVsPrev > 0 ? 'text-emerald-500' : deltaVsPrev < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                              {deltaVsPrev > 0 ? '↑' : deltaVsPrev < 0 ? '↓' : '='}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <span className="text-sm font-bold text-slate-900 dark:text-white">
-                      {khatmas} khatma{khatmas > 1 ? 's' : ''} + {progressInCycle} hizb
-                    </span>
-                  </div>
 
-                  {/* Moyenne 8 sem */}
-                  <div className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-900/30 transition-colors">
-                    <div className="flex items-center">
-                      <BarChart3 className="h-4 w-4 text-emerald-500 mr-2" />
-                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Moyenne (8 sem)</span>
+                    {/* Progress bar */}
+                    <div className="mb-3 space-y-1">
+                      <div className="flex justify-between text-[10px] text-slate-400 dark:text-slate-500">
+                        <span>Hizb {heroHizb} / 60</span>
+                        <span>{Math.round(heroHizb / 60 * 100)}%</span>
+                      </div>
+                      <div className="h-1 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-500 rounded-full"
+                          style={{ width: `${Math.max(2, heroHizb / 60 * 100)}%` }}
+                        />
+                      </div>
                     </div>
-                    <span className="text-sm font-bold text-slate-900 dark:text-white">
-                      {weeklyAverage} /sem
-                    </span>
-                  </div>
 
-                  {/* Meilleure semaine */}
-                  <div className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-900/30 transition-colors">
-                    <div className="flex items-center">
-                      <Award className="h-4 w-4 text-amber-500 mr-2" />
-                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Record hebdo</span>
-                    </div>
-                    <span className="text-sm font-bold text-slate-900 dark:text-white">
-                      {bestVal} hizb
-                    </span>
-                  </div>
-
-                  {/* Série actuelle */}
-                  <div className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-900/30 transition-colors">
-                    <div className="flex items-center">
-                      <Zap className="h-4 w-4 text-orange-500 mr-2" />
-                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Série</span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-sm font-bold text-slate-900 dark:text-white block">
-                        {currentStreak > 0 ? `${currentStreak} sem 🔥` : '-'}
-                    </span>
-                      {bestStreak > currentStreak && (
-                        <span className="text-[10px] text-slate-400 block">Record: {bestStreak}</span>
-                      )}
+                    {/* Mini stats */}
+                    <div className="flex gap-1.5">
+                      <div className="flex-1 bg-slate-50 dark:bg-slate-900/50 rounded-xl p-2 text-center">
+                        <p className="text-xs font-bold text-slate-900 dark:text-white tabular-nums">{weeklyAverage}</p>
+                        <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">moy/sem</p>
+                      </div>
+                      <div className="flex-1 bg-slate-50 dark:bg-slate-900/50 rounded-xl p-2 text-center">
+                        <p className="text-xs font-bold text-slate-900 dark:text-white">
+                          {currentStreak > 0 ? `${currentStreak}🔥` : '—'}
+                        </p>
+                        <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">série</p>
+                      </div>
+                      <div className={`flex-1 rounded-xl p-2 text-center ${
+                        hizbRetard.status === 'retard' ? 'bg-rose-50 dark:bg-rose-900/20' :
+                        hizbRetard.status === 'avance' ? 'bg-blue-50 dark:bg-blue-900/20' :
+                        'bg-emerald-50 dark:bg-emerald-900/20'
+                      }`}>
+                        <p className={`text-xs font-bold tabular-nums ${
+                          hizbRetard.status === 'retard' ? 'text-rose-600 dark:text-rose-400' :
+                          hizbRetard.status === 'avance' ? 'text-blue-600 dark:text-blue-400' :
+                          'text-emerald-600 dark:text-emerald-400'
+                        }`}>
+                          {hizbRetard.status === 'retard' ? `-${hizbRetard.retard}` :
+                           hizbRetard.status === 'avance' ? `+${hizbRetard.retard}` : '✓'}
+                        </p>
+                        <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">
+                          {hizbRetard.status === 'retard' ? 'retard' : hizbRetard.status === 'avance' ? 'avance' : 'à jour'}
+                        </p>
+                      </div>
                     </div>
                   </div>
-
-                  {/* Hizb en retard */}
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700/50">
-                    <div className="flex items-center">
-                      {hizbRetard.status === 'retard' ? (
-                        <TrendingDown className="h-4 w-4 text-rose-500 mr-2" />
-                      ) : hizbRetard.status === 'ajour' ? (
-                        <CheckCircle className="h-4 w-4 text-emerald-500 mr-2" />
-                      ) : (
-                        <TrendingUp className="h-4 w-4 text-blue-500 mr-2" />
-                      )}
-                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Statut</span>
-                    </div>
-                    <span
-                      className={`text-sm font-bold ${
-                        hizbRetard.status === 'avance'
-                          ? 'text-blue-600 dark:text-blue-400'
-                          : hizbRetard.status === 'retard'
-                          ? 'text-rose-600 dark:text-rose-400'
-                          : 'text-emerald-600 dark:text-emerald-400'
-                      }`}
-                    >
-                      {hizbRetard.status === 'retard' 
-                        ? `-${hizbRetard.retard}`
-                        : hizbRetard.status === 'avance'
-                        ? `+${hizbRetard.retard}`
-                        : 'À jour'}
-                    </span>
-                  </div>
-
-                  {/* Prédiction */}
-                  {prediction && (
-                    <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400">Khatma estimée</span>
-                      <span className="text-xs font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 px-2 py-0.5 rounded-md">
-                        {prediction}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        )}
-      </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

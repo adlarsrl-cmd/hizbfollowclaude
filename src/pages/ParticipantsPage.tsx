@@ -2,18 +2,20 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Plus,
   Search,
-  Filter,
   Upload,
   Download,
   Edit,
   Trash2,
   User,
-  Mail,
-  ToggleLeft,
   ToggleRight,
   Target,
-  Loader2
+  Loader2,
+  Link2,
+  Copy,
+  UserX
 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { useToast } from '../stores/useToast';
 import { useAppStore } from '../stores/useAppStore';
 import { toCSV, parseCSV, calculateWeeklyDeltas } from '../lib/utils';
 import type { Participant } from '../types';
@@ -30,6 +32,8 @@ export default function ParticipantsPage() {
     loading
   } = useAppStore();
 
+  const { success, error: showError } = useToast();
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filterActive, setFilterActive] = useState<'all' | 'active' | 'inactive'>('all');
   const [showModal, setShowModal] = useState(false);
@@ -41,6 +45,11 @@ export default function ParticipantsPage() {
     active: true,
     weekly_target_hizb: 7 as 7 | 14
   });
+
+  // Linking state
+  const [linkingParticipant, setLinkingParticipant] = useState<Participant | null>(null);
+  const [generatedLink, setGeneratedLink] = useState('');
+  const [generatingLink, setGeneratingLink] = useState(false);
 
   useEffect(() => {
     fetchParticipants();
@@ -112,6 +121,34 @@ export default function ParticipantsPage() {
         console.error('Error deleting participant:', error);
       }
     }
+  };
+
+  const handleGenerateLink = async (participant: Participant) => {
+    setLinkingParticipant(participant);
+    setGeneratedLink('');
+    setGeneratingLink(true);
+    try {
+      const { data, error } = await supabase.rpc('generate_participant_link', {
+        p_participant_id: participant.id
+      });
+      if (error || !(data as any)?.success) {
+        showError((data as any)?.error || error?.message || 'Erreur lors de la génération');
+        setLinkingParticipant(null);
+      } else {
+        const token = (data as any).token as string;
+        setGeneratedLink(`${window.location.origin}/link-account?token=${token}`);
+      }
+    } catch (err: any) {
+      showError(err.message || 'Erreur inconnue');
+      setLinkingParticipant(null);
+    } finally {
+      setGeneratingLink(false);
+    }
+  };
+
+  const copyLink = () => {
+    navigator.clipboard.writeText(generatedLink);
+    success('Lien copié !');
   };
 
   const toggleActive = async (participant: Participant) => {
@@ -324,11 +361,27 @@ export default function ParticipantsPage() {
                       )}
                     </div>
                     <div className="ml-3">
-                      <div className="font-medium text-slate-900 dark:text-white">{participant.name}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium text-slate-900 dark:text-white">{participant.name}</span>
+                        {!participant.user_id && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 text-xs">
+                            <UserX className="w-3 h-3" /> ghost
+                          </span>
+                        )}
+                      </div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">{participant.email || 'Sans email'}</div>
                     </div>
                   </div>
                   <div className="flex gap-2">
+                    {!participant.user_id && (
+                      <button
+                        onClick={() => handleGenerateLink(participant)}
+                        className="p-2 text-slate-400 hover:text-violet-600 bg-slate-50 dark:bg-slate-800 rounded-lg"
+                        title="Lier un compte"
+                      >
+                        <Link2 className="h-4 w-4" />
+                      </button>
+                    )}
                     <button
                       onClick={() => handleEdit(participant)}
                       className="p-2 text-slate-400 hover:text-emerald-600 bg-slate-50 dark:bg-slate-800 rounded-lg"
@@ -414,7 +467,14 @@ export default function ParticipantsPage() {
                           )}
                         </div>
                         <div className="ml-4">
-                          <div className="font-medium text-slate-900 dark:text-white">{participant.name}</div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium text-slate-900 dark:text-white">{participant.name}</span>
+                            {!participant.user_id && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 text-xs">
+                                <UserX className="w-3 h-3" /> ghost
+                              </span>
+                            )}
+                          </div>
                           <div className="text-xs text-slate-500 dark:text-slate-400">{participant.email || 'Sans email'}</div>
                         </div>
                       </div>
@@ -444,6 +504,15 @@ export default function ParticipantsPage() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {!participant.user_id && (
+                          <button
+                            onClick={() => handleGenerateLink(participant)}
+                            className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-900/20 rounded-lg transition-colors"
+                            title="Lier un compte"
+                          >
+                            <Link2 className="h-4 w-4" />
+                          </button>
+                        )}
                         <button
                           onClick={() => handleEdit(participant)}
                           className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors"
@@ -566,6 +635,60 @@ export default function ParticipantsPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal — Lier un compte */}
+      {linkingParticipant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-md shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-violet-600 dark:text-violet-400">
+                  <Link2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Lier un compte</h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{linkingParticipant.name}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {generatingLink ? (
+                <div className="flex justify-center py-4">
+                  <div className="animate-spin h-7 w-7 border-2 border-violet-600 border-t-transparent rounded-full" />
+                </div>
+              ) : generatedLink ? (
+                <>
+                  <p className="text-sm text-slate-600 dark:text-slate-300">
+                    Envoyez ce lien au participant. Une fois connecté, il pourra revendiquer son historique.
+                  </p>
+                  <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 rounded-xl p-3">
+                    <code className="flex-1 text-xs text-slate-700 dark:text-slate-300 break-all font-mono">
+                      {generatedLink}
+                    </code>
+                    <button
+                      onClick={copyLink}
+                      className="flex-shrink-0 p-2 text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-900/20 rounded-lg transition-colors"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-400 dark:text-slate-500">
+                    Ce lien est à usage unique et expire si inutilisé.
+                  </p>
+                </>
+              ) : null}
+
+              <button
+                onClick={() => { setLinkingParticipant(null); setGeneratedLink(''); }}
+                className="w-full py-3 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+              >
+                Fermer
+              </button>
+            </div>
           </div>
         </div>
       )}

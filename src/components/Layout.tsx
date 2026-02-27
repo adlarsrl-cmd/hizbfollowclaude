@@ -1,51 +1,52 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { 
+import React, { useEffect, useRef, useState } from 'react';
+import { Outlet, Link, useLocation } from 'react-router-dom';
+import {
   Home,
-  Users,
+  Book,
   BarChart3,
+  Users,
+  User,
+  BookOpen,
+  ChevronDown,
+  LogOut,
   Settings,
-  CreditCard as Edit3,
-  WifiOff,
   Moon,
   Sun,
   Monitor,
-  ChevronDown,
-  LogOut,
-  Menu,
-  X,
-  BookOpen,
-  Book,
-  User,
-  Bell,
-  Search,
-  Sparkles
+  WifiOff
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import GroupSelector from './GroupSelector';
 import EmailVerificationBanner from './EmailVerificationBanner';
+import BottomTabBar from './BottomTabBar';
+
+// Desktop sidebar nav items (same 5 as bottom tabs)
+const desktopNavItems = [
+  { name: 'Accueil',  href: '/',          icon: Home },
+  { name: 'Coran',    href: '/quran',     icon: Book },
+  { name: 'Stats',    href: '/analytics', icon: BarChart3 },
+  { name: 'Groupes',  href: '/groups',    icon: Users },
+  { name: 'Profil',   href: '/profil',    icon: User },
+];
 
 export default function Layout() {
   const location = useLocation();
-  const navigate = useNavigate();
   const {
     theme,
     setTheme,
     isOnline,
-    syncQueue,
     user,
     signOut,
     enableGroups,
     activeGroupId,
-    currentUserRole,
-    userProfile
+    userProfile,
+    currentUserRole
   } = useAppStore();
 
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const profileDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown when clicking outside
+  // Close dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (profileDropdownRef.current && !profileDropdownRef.current.contains(event.target as Node)) {
@@ -76,98 +77,16 @@ export default function Layout() {
   const getThemeIcon = () => {
     switch (theme) {
       case 'light': return Sun;
-      case 'dark': return Moon;
-      case 'auto': return Monitor;
+      case 'dark':  return Moon;
+      case 'auto':  return Monitor;
     }
   };
   const ThemeIcon = getThemeIcon();
 
-  // Navigation Items
-  const navItems = [
-    { 
-      name: 'Tableau de bord', 
-      href: '/', 
-      icon: Home, 
-      allowedRoles: ['owner', 'manager', 'member', 'viewer'] 
-    },
-    { 
-      name: 'Participants', 
-      href: '/participants', 
-      icon: Users, 
-      allowedRoles: ['owner', 'manager'] 
-    },
-    { 
-      name: 'Analytics', 
-      href: '/analytics', 
-      icon: BarChart3, 
-      allowedRoles: ['owner', 'manager', 'member', 'viewer'] 
-    },
-    {
-      name: 'Saisie Hebdo',
-      href: '/entry',
-      icon: Edit3,
-      allowedRoles: ['owner', 'manager']
-    },
-    {
-      name: 'Saisie Mensuelle',
-      href: '/monthly',
-      icon: BookOpen,
-      allowedRoles: ['owner', 'manager']
-    },
-    {
-      name: 'Ma Saisie',
-      href: '/me/entry',
-      icon: Edit3,
-      allowedRoles: ['member', 'viewer'],
-      hidden: currentUserRole === 'owner' || currentUserRole === 'manager'
-    },
-    {
-      name: 'Coran',
-      href: '/quran',
-      icon: Book,
-      allowedRoles: ['owner', 'manager', 'member', 'viewer']
-    },
-    {
-      name: 'Ramadan',
-      href: '/ramadan',
-      icon: Sparkles,
-      allowedRoles: ['owner', 'manager', 'member', 'viewer']
-    }
-  ];
-
-  const filteredNavItems = navItems.filter(item => 
-    (!item.hidden) && 
-    (!currentUserRole || item.allowedRoles.includes(currentUserRole))
-  );
-
-  if (enableGroups && !activeGroupId && location.pathname !== '/groups') {
-    return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4">
-        <div className="text-center max-w-md w-full bg-white dark:bg-slate-900 rounded-3xl p-8 shadow-xl border border-slate-200 dark:border-slate-800">
-          <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 rounded-2xl flex items-center justify-center mx-auto mb-6 text-emerald-600 dark:text-emerald-400">
-            <Users className="w-8 h-8" />
-          </div>
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">
-            Sélectionnez un groupe
-          </h2>
-          <p className="text-slate-600 dark:text-slate-400 mb-8">
-            Pour commencer à utiliser l'application, veuillez sélectionner ou rejoindre un groupe de lecture.
-          </p>
-          <Link
-            to="/groups"
-            className="block w-full py-3 px-4 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all font-medium shadow-lg shadow-emerald-500/20"
-          >
-            Voir mes groupes
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 flex">
-      
-      {/* Desktop Sidebar */}
+
+      {/* ── Desktop Sidebar (hidden on mobile) ── */}
       <aside className="hidden lg:flex flex-col w-72 fixed inset-y-0 left-0 border-r border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl z-50">
         {/* Logo */}
         <div className="h-20 flex items-center px-8 border-b border-slate-100 dark:border-slate-800/50">
@@ -181,64 +100,77 @@ export default function Layout() {
           </div>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto scrollbar-hide">
-          <div className="mb-6 px-4">
-            <GroupSelector />
-          </div>
+        {/* Group selector */}
+        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800/50">
+          <GroupSelector />
+        </div>
 
-          <div className="space-y-1">
-            {filteredNavItems.map((item) => {
-              const isActive = location.pathname === item.href;
-              return (
-                <Link
-                  key={item.name}
-                  to={item.href}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${
-                    isActive 
-                      ? 'bg-emerald-50 dark:bg-emerald-900/10 text-emerald-600 dark:text-emerald-400 font-medium' 
-                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  <item.icon className={`w-5 h-5 transition-colors ${
-                    isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 group-hover:text-slate-600 dark:text-slate-500 dark:group-hover:text-slate-300'
-                  }`} />
-                  {item.name}
-                </Link>
-              );
-            })}
-          </div>
-
-          {enableGroups && (
-            <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800/50">
-              <div className="px-4 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                Gestion
-              </div>
+        {/* Nav items */}
+        <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto scrollbar-hide">
+          {desktopNavItems.map((item) => {
+            const isActive =
+              item.href === '/'
+                ? location.pathname === '/'
+                : location.pathname.startsWith(item.href);
+            return (
               <Link
-                to="/groups"
+                key={item.name}
+                to={item.href}
+                className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${
+                  isActive
+                    ? 'bg-emerald-50 dark:bg-emerald-900/10 text-emerald-600 dark:text-emerald-400 font-medium'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <item.icon
+                  className={`w-5 h-5 transition-colors ${
+                    isActive
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-slate-400 group-hover:text-slate-600 dark:text-slate-500 dark:group-hover:text-slate-300'
+                  }`}
+                />
+                {item.name}
+              </Link>
+            );
+          })}
+
+          {/* Participants link for owner/manager (desktop only) */}
+          {(currentUserRole === 'owner' || currentUserRole === 'manager') && (
+            <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800/50">
+              <p className="px-4 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                Gestion
+              </p>
+              <Link
+                to="/participants"
                 className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
-                  location.pathname === '/groups'
+                  location.pathname === '/participants'
                     ? 'bg-emerald-50 dark:bg-emerald-900/10 text-emerald-600 dark:text-emerald-400 font-medium'
                     : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50'
                 }`}
               >
                 <Users className="w-5 h-5" />
-                Mes Groupes
+                Participants
               </Link>
             </div>
           )}
         </nav>
 
-        {/* User Profile Footer */}
+        {/* User profile footer */}
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+          {!isOnline && (
+            <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 text-xs">
+              <WifiOff className="w-3.5 h-3.5 flex-shrink-0" />
+              Mode hors-ligne
+            </div>
+          )}
           <div className="relative" ref={profileDropdownRef}>
             <button
               onClick={() => setShowProfileDropdown(!showProfileDropdown)}
               className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-white dark:hover:bg-slate-800 transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-700"
             >
-              <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-700 dark:text-emerald-300 font-bold border-2 border-white dark:border-slate-800 shadow-sm">
+              <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-700 dark:text-emerald-300 font-bold border-2 border-white dark:border-slate-800 shadow-sm flex-shrink-0">
                 {userProfile?.avatar_url ? (
-                  <img src={userProfile.avatar_url} className="w-full h-full rounded-full object-cover" />
+                  <img src={userProfile.avatar_url} className="w-full h-full rounded-full object-cover" alt="avatar" />
                 ) : (
                   user?.email?.charAt(0).toUpperCase()
                 )}
@@ -248,14 +180,13 @@ export default function Layout() {
                   {userProfile?.display_name || user?.email?.split('@')[0]}
                 </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                  {currentUserRole === 'owner' ? 'Propriétaire' : 
-                   currentUserRole === 'manager' ? 'Gestionnaire' : 'Membre'}
+                  {currentUserRole === 'owner'   ? 'Propriétaire' :
+                   currentUserRole === 'manager' ? 'Gestionnaire'  : 'Membre'}
                 </p>
               </div>
               <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showProfileDropdown ? 'rotate-180' : ''}`} />
             </button>
 
-            {/* Profile Dropdown */}
             {showProfileDropdown && (
               <div className="absolute bottom-full left-0 w-full mb-2 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-scale-in origin-bottom">
                 <div className="p-2 space-y-1">
@@ -291,91 +222,24 @@ export default function Layout() {
         </div>
       </aside>
 
-      {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 z-[60]" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
-      <div className="h-16 px-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-            <BookOpen className="w-5 h-5 text-white" />
-          </div>
-          <span className="font-bold text-lg text-slate-900 dark:text-white">
-            HizbFollow
-          </span>
-        </div>
-        <button
-          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
-        >
-          {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-        </button>
-      </div>
-      </div>
+      {/* ── Main content ── */}
+      <main className="flex-1 min-h-screen lg:ml-72">
+        {/* Mobile: safe area top spacer */}
+        <div className="lg:hidden" style={{ height: 'env(safe-area-inset-top, 0px)' }} />
 
-      {/* Mobile Drawer */}
-      {isMobileMenuOpen && (
-        <div className="lg:hidden fixed inset-0 z-[100]">
-          <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)} />
-          <div className="absolute inset-y-0 right-0 w-64 bg-white dark:bg-slate-900 shadow-2xl p-6 flex flex-col">
-            <div className="mt-16 space-y-6 flex-1">
-              <GroupSelector />
-              
-              <nav className="space-y-2">
-                {filteredNavItems.map((item) => {
-                   const isActive = location.pathname === item.href;
-                   return (
-                    <Link
-                      key={item.name}
-                      to={item.href}
-                      onClick={() => setIsMobileMenuOpen(false)}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                        isActive 
-                          ? 'bg-emerald-50 dark:bg-emerald-900/10 text-emerald-600 dark:text-emerald-400 font-medium' 
-                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      <item.icon className="w-5 h-5" />
-                      {item.name}
-                    </Link>
-                  );
-                })}
-              </nav>
-
-              <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
-                 <Link
-                    to="/settings"
-                    onClick={() => setIsMobileMenuOpen(false)}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
-                  >
-                    <Settings className="w-5 h-5" />
-                    Paramètres
-                  </Link>
-                  <button
-                    onClick={() => {
-                      setIsMobileMenuOpen(false);
-                      signOut();
-                    }}
-                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/10"
-                  >
-                    <LogOut className="w-5 h-5" />
-                    Déconnexion
-                  </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Main Content Area */}
-      <main className={`flex-1 min-h-screen transition-all duration-300 ${isMobileMenuOpen ? 'blur-sm lg:blur-0' : ''}`}>
-        <div className="lg:hidden" style={{ height: 'calc(4rem + env(safe-area-inset-top, 0px))' }} /> {/* Spacer for mobile header + safe area */}
-        <div className="p-4 lg:p-8 lg:ml-72 max-w-7xl mx-auto">
-          <div className="mb-6 lg:mb-8 animate-fade-in">
+        <div className="p-4 lg:p-8 max-w-7xl mx-auto">
+          <div className="mb-4 lg:mb-6 animate-fade-in">
             <EmailVerificationBanner />
           </div>
           <Outlet />
         </div>
+
+        {/* Mobile: spacer for bottom tab bar */}
+        <div className="lg:hidden" style={{ height: 'calc(4.5rem + env(safe-area-inset-bottom, 0px))' }} />
       </main>
 
+      {/* ── Mobile bottom tab bar ── */}
+      <BottomTabBar />
     </div>
   );
 }

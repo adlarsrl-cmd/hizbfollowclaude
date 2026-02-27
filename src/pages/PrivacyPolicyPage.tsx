@@ -99,9 +99,9 @@ export default function PrivacyPolicyPage() {
               <a href="mailto:contact@hizbfollow.app" className="text-emerald-600 dark:text-emerald-400 hover:underline">
                 contact@hizbfollow.app
               </a>.
-              En cas de réponse insatisfaisante, vous pouvez saisir la{' '}
-              <a href="https://www.cnil.fr" target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">
-                CNIL
+              En cas de réponse insatisfaisante, vous pouvez saisir l'{' '}
+              <a href="https://www.autoriteprotectiondonnees.be" target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">
+                APD (Autorité de Protection des Données)
               </a>.
             </p>
           </section>
