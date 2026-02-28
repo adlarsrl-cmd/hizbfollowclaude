@@ -4,6 +4,7 @@ import {
   Book,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   List,
   Loader2,
   X,
@@ -40,7 +41,7 @@ import BottomTabBar from '../components/BottomTabBar';
 type ViewMode = 'page' | 'surah';
 type LanguageMode = 'arabic' | 'french' | 'both';
 type FontSize = 'small' | 'medium' | 'large' | 'xlarge';
-type FontFamily = 'scheherazade' | 'amiri' | 'noto' | 'v2' | 'v4';
+type FontFamily = 'scheherazade' | 'amiri' | 'noto';
 
 // Styles CSS pour le Tajweed - basé sur quran.com
 const tajweedStyles = `
@@ -410,9 +411,9 @@ const tajweedStyles = `
 
   /* ===== AUDIO VERSE HIGHLIGHT ===== */
   .verse-clickable.audio-playing {
-    background: rgba(57, 181, 120, 0.10);
-    border-color: rgba(57, 181, 120, 0.40);
-    box-shadow: 0 0 0 1px rgba(57, 181, 120, 0.20);
+    background: rgba(57, 181, 120, 0.22) !important;
+    border-color: rgba(57, 181, 120, 0.70) !important;
+    box-shadow: 0 2px 16px rgba(57, 181, 120, 0.25) !important;
   }
 `;
 
@@ -877,8 +878,9 @@ export default function QuranReaderPage() {
   
   // Page mode word-level data (for exact mushaf line layout)
   const [pageWords, setPageWords] = useState<WordWithLine[]>([]);
-  // QPC glyph font readiness (shared for v2 and v4)
-  const [glyphFontReady, setGlyphFontReady] = useState(false);
+
+  // Settings dropdowns
+  const [openDropdown, setOpenDropdown] = useState<'reciter' | 'font' | null>(null);
 
   // Translation: 136 = Montada (default), 31 = Hamidullah
   const [selectedTranslationId, setSelectedTranslationId] = useState<number>(
@@ -916,11 +918,11 @@ export default function QuranReaderPage() {
   const mushafNoScrollRef = useRef<HTMLDivElement>(null);
   const [mushafAutoFontSize, setMushafAutoFontSize] = useState(18);
 
-  // Font family → CSS class (v4 has no class — handled separately via inline style)
+  // Font family → CSS class
   const fontFamilyClass = (f: FontFamily): string => {
     if (f === 'scheherazade') return 'font-scheherazade';
     if (f === 'noto') return 'font-noto';
-    return ''; // 'amiri' and 'v4' — base CSS or inline style
+    return ''; // 'amiri' — base CSS
   };
 
   // Font sizes mapping — smaller baseline on mobile
@@ -1075,7 +1077,7 @@ export default function QuranReaderPage() {
   }, [verses, surahs, viewMode]);
 
   // Exact mushaf line layout: words grouped by line_number with tajweed applied per word
-  interface MushafRenderItem { html: string; codeV2: string; verseKey: string; charType: string; }
+  interface MushafRenderItem { html: string; verseKey: string; charType: string; }
   interface MushafRenderLine {
     lineNum: number;
     items: MushafRenderItem[];
@@ -1111,30 +1113,23 @@ export default function QuranReaderPage() {
 
       let itemHtml: string;
 
-      let codeV2 = '';
       if (word.char_type_name === 'end') {
         // Verse-end ornament with Arabic-Indic numerals (١٢٣...)
         const verseNum = parseInt(word.verse_key.split(':')[1]);
         itemHtml = `<span class="verse-number-inline"><span class="qv-r">&#x06DD;</span><span class="qv-n">${toArabicNumerals(verseNum)}</span></span>`;
-        codeV2 = itemHtml; // ornament is the same in glyph mode
       } else if (word.text_uthmani_tajweed) {
-        // PRIMARY: word-level tajweed from API. The API returns <rule class=...> tags
-        // at the word level, while the verse level uses <tajweed class=...>.
-        // processWordTajweed normalizes <rule> → <tajweed> then applies full processing.
+        // PRIMARY: word-level tajweed from API
         itemHtml = processWordTajweed(word.text_uthmani_tajweed);
-        codeV2 = word.code_v2 || processTajweedHtml(word.text_uthmani);
       } else {
-        // FALLBACK: verse-level tajweed split by position.
-        // word.position is 1-indexed within the verse (absolute, works cross-page).
+        // FALLBACK: verse-level tajweed split by position
         const chunks = verseTajweedWords.get(word.verse_key) || [];
         const idx = word.position - 1;
         itemHtml = (idx >= 0 && idx < chunks.length)
           ? chunks[idx]
           : processTajweedHtml(word.text_uthmani);
-        codeV2 = word.code_v2 || itemHtml;
       }
 
-      lineItems.get(lineNum)!.push({ html: itemHtml, codeV2, verseKey: word.verse_key, charType: word.char_type_name });
+      lineItems.get(lineNum)!.push({ html: itemHtml, verseKey: word.verse_key, charType: word.char_type_name });
     }
 
     const sortedLineNums = [...lineItems.keys()].sort((a, b) => a - b);
@@ -1197,9 +1192,10 @@ export default function QuranReaderPage() {
       const pageInfoH = pageInfo ? 30 : 0;
       // Scheherazade New and Amiri Quran have wider glyphs — use a larger divisor
       // so the computed font size is smaller and lines don't overflow horizontally.
-      const lhDivisor = (!glyphFontReady && (fontFamily === 'scheherazade' || fontFamily === 'amiri')) ? 2.65 : 2.2;
+      const lhDivisor = (fontFamily === 'scheherazade' || fontFamily === 'amiri') ? 2.65 : 2.2;
       const computed = Math.floor((availH - pageInfoH) / totalFlex / lhDivisor);
-      setMushafAutoFontSize(Math.min(computed, 30));
+      const maxSize = currentPage === 1 ? 20 : currentPage === 2 ? 24 : 30;
+      setMushafAutoFontSize(Math.min(computed, maxSize));
     };
     compute();
     // Window resize covers viewport size changes (rotation, browser chrome show/hide).
@@ -1210,45 +1206,8 @@ export default function QuranReaderPage() {
       ro.disconnect();
       window.removeEventListener('resize', compute);
     };
-  }, [viewMode, mushafLines.length, pageInfo, glyphFontReady, fontFamily]);
+  }, [viewMode, mushafLines.length, pageInfo, fontFamily, currentPage]);
 
-  // QPC V2/V4 — unified glyph font loading (per-page, from verses.quran.foundation CDN)
-  useEffect(() => {
-    if (viewMode !== 'page' || (fontFamily !== 'v2' && fontFamily !== 'v4')) {
-      setGlyphFontReady(false);
-      return;
-    }
-    let cancelled = false;
-    setGlyphFontReady(false);
-
-    const version = fontFamily; // 'v2' or 'v4'
-    const loadFont = async (page: number): Promise<void> => {
-      const name = `p${page}-${version}`;
-      if (document.fonts.check(`12px "${name}"`)) return;
-      let src: string;
-      if (version === 'v4') {
-        src = `url('https://verses.quran.foundation/fonts/quran/hafs/v4/colrv1/woff2/p${page}.woff2') format('woff2'),` +
-              `url('https://verses.quran.foundation/fonts/quran/hafs/v4/colrv1/woff/p${page}.woff') format('woff')`;
-      } else {
-        src = `url('https://verses.quran.foundation/fonts/quran/hafs/v2/woff2/p${page}.woff2') format('woff2'),` +
-              `url('https://verses.quran.foundation/fonts/quran/hafs/v2/woff/p${page}.woff') format('woff')`;
-      }
-      const face = new FontFace(name, src, { display: 'block' });
-      document.fonts.add(face);
-      await face.load();
-    };
-
-    loadFont(currentPage)
-      .then(() => { if (!cancelled) setGlyphFontReady(true); })
-      .catch(err => console.warn('[QPC font] load failed:', err));
-
-    // Preload adjacent pages silently
-    for (const adj of [currentPage - 1, currentPage + 1]) {
-      if (adj >= 1 && adj <= 604) loadFont(adj).catch(() => {});
-    }
-
-    return () => { cancelled = true; };
-  }, [viewMode, currentPage, fontFamily]);
 
   // Keyboard navigation (arrow keys) — ← next, → prev (RTL convention)
   useEffect(() => {
@@ -1582,26 +1541,6 @@ export default function QuranReaderPage() {
 
   const isAuthenticated = !!user;
 
-  // Dynamic CSS injected when QPC V2/V4 glyph font is ready for the current page:
-  // - V4: @font-palette-values selects light (0) or dark (1) tajweed COLRv1 palette
-  // - V2: plain glyphs, no color palette
-  // - .mushaf-glyph .qv-r / .qv-n keep Scheherazade New for the ۝ verse marker
-  const glyphDynamicStyle = glyphFontReady ? `
-  ${fontFamily === 'v4' ? `@font-palette-values --QpcGlyphPalette {
-    font-family: 'p${currentPage}-v4';
-    base-palette: ${isDark ? 1 : 0};
-  }
-  .mushaf-glyph { font-palette: --QpcGlyphPalette; }` : ''}
-  .mushaf-glyph .tajweed-text {
-    font-family: 'p${currentPage}-${fontFamily}' !important;
-    word-spacing: 0.04em;
-    line-height: 2.4 !important;
-  }
-  .mushaf-glyph .qv-r,
-  .mushaf-glyph .qv-n {
-    font-family: 'Scheherazade New', 'Amiri Quran', serif !important;
-  }
-  ` : '';
 
   const showOverlayWithTimer = () => {
     if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
@@ -1616,7 +1555,7 @@ export default function QuranReaderPage() {
 
   return (
     <>
-      <style>{tajweedStyles + glyphDynamicStyle}</style>
+      <style>{tajweedStyles}</style>
       
       <div
         className={`quran-container min-h-screen ${isDark ? '' : 'quran-light'}`}
@@ -1679,16 +1618,15 @@ export default function QuranReaderPage() {
                   <div className={`flex items-center justify-between text-[10px] px-1 py-1 flex-shrink-0 ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>
                     <span>{pageInfo.surahName}</span>
                     <span>Juz {pageInfo.juz} · {pageInfo.hizbLabel}</span>
-                    <span>صفحة {toArabicNumerals(currentPage)}</span>
+                    <span>Page {currentPage}</span>
                   </div>
                 )}
 
                 {/* Mushaf no-scroll container — lines fill available height */}
                 <div
-                  className={`mushaf-no-scroll flex-1 min-h-0 ${glyphFontReady ? 'mushaf-glyph' : fontFamilyClass(fontFamily)}`}
+                  className={`mushaf-no-scroll flex-1 min-h-0 ${fontFamilyClass(fontFamily)}`}
                   style={{
                     fontSize: `${mushafAutoFontSize}px`,
-                    fontFamily: glyphFontReady ? `'p${currentPage}-${fontFamily}'` : undefined,
                   }}
                 >
                   {mushafLines.map((line) => {
@@ -1731,24 +1669,18 @@ export default function QuranReaderPage() {
                                   </svg>
                                 ))}
                                 <span
-                                  className={`font-bold ${isDark ? 'text-amber-200' : 'text-amber-900'} ${fontFamilyClass((fontFamily === 'v4' || fontFamily === 'v2') ? 'scheherazade' : fontFamily)}`}
-                                  style={{ fontSize: `${mushafAutoFontSize * 0.88}px` }}
+                                  className={`font-bold tracking-wide ${isDark ? 'text-amber-200' : 'text-amber-900'} ${fontFamilyClass(fontFamily)}`}
+                                  style={{ fontSize: `${mushafAutoFontSize * 0.92}px` }}
                                 >
                                   سُورَةُ {si?.name_arabic}
                                 </span>
-                                {si?.translated_name?.name && (
-                                  <span className={`font-medium ${isDark ? 'text-amber-500/70' : 'text-amber-700/70'}`}
-                                    style={{ fontSize: `${mushafAutoFontSize * 0.46}px`, alignSelf: 'center' }}>
-                                    {si.translated_name.name}
-                                  </span>
-                                )}
                               </div>
                               {/* Divider below box */}
                               <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '5px', marginBottom: line.newSurahBefore.hasBismillah ? '1px' : '0' }}>
                                 <div style={{ flex: 1, height: '1px', background: `linear-gradient(90deg, transparent, ${gold}, transparent)` }} />
                               </div>
                               {line.newSurahBefore.hasBismillah && (
-                                <div className={`bismillah-text ${fontFamilyClass((fontFamily === 'v4' || fontFamily === 'v2') ? 'scheherazade' : fontFamily)}`}
+                                <div className={`bismillah-text ${fontFamilyClass(fontFamily)}`}
                                   style={{ fontSize: `${mushafAutoFontSize * 1.1}px` }}>﷽</div>
                               )}
                             </div>
@@ -1756,7 +1688,7 @@ export default function QuranReaderPage() {
                         })()}
 
                         {/* The mushaf line — each word clickable */}
-                        <div className={`mushaf-line tajweed-text ${glyphFontReady ? '' : fontFamilyClass(fontFamily)}`}>
+                        <div className={`mushaf-line tajweed-text ${fontFamilyClass(fontFamily)}`}>
                           {line.items.map((item, wi) => (
                             <span
                               key={wi}
@@ -1777,7 +1709,7 @@ export default function QuranReaderPage() {
                               onPointerUp={() => { if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; } }}
                               onPointerLeave={() => { if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; } }}
                               onPointerCancel={() => { if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; } }}
-                              dangerouslySetInnerHTML={{ __html: glyphFontReady ? item.codeV2 : item.html }}
+                              dangerouslySetInnerHTML={{ __html: item.html }}
                             />
                           ))}
                         </div>
@@ -2061,19 +1993,19 @@ export default function QuranReaderPage() {
                   <div
                     className="absolute top-0.5 bottom-0.5 w-8 rounded-[10px] bg-emerald-600 shadow-md"
                     style={{
-                      left: viewMode === 'surah' ? '2px' : '34px',
+                      left: viewMode === 'page' ? '2px' : '34px',
                       transition: 'left 0.22s cubic-bezier(0.34, 1.56, 0.64, 1)',
                     }}
                   />
                   <button
-                    onClick={() => { switchViewMode('surah'); resetOverlayTimer(); }}
-                    className={`relative z-10 w-8 h-8 flex items-center justify-center rounded-[10px] transition-colors duration-200 ${viewMode === 'surah' ? 'text-white' : isDark ? 'text-gray-500' : 'text-gray-400'}`}
+                    onClick={() => { switchViewMode('page'); resetOverlayTimer(); }}
+                    className={`relative z-10 w-8 h-8 flex items-center justify-center rounded-[10px] transition-colors duration-200 ${viewMode === 'page' ? 'text-white' : isDark ? 'text-gray-500' : 'text-gray-400'}`}
                   >
                     <BookOpen className="h-[15px] w-[15px]" />
                   </button>
                   <button
-                    onClick={() => { switchViewMode('page'); resetOverlayTimer(); }}
-                    className={`relative z-10 w-8 h-8 flex items-center justify-center rounded-[10px] transition-colors duration-200 ${viewMode === 'page' ? 'text-white' : isDark ? 'text-gray-500' : 'text-gray-400'}`}
+                    onClick={() => { switchViewMode('surah'); resetOverlayTimer(); }}
+                    className={`relative z-10 w-8 h-8 flex items-center justify-center rounded-[10px] transition-colors duration-200 ${viewMode === 'surah' ? 'text-white' : isDark ? 'text-gray-500' : 'text-gray-400'}`}
                   >
                     <Layers className="h-[15px] w-[15px]" />
                   </button>
@@ -2133,10 +2065,10 @@ export default function QuranReaderPage() {
           </div>
         )}
 
-        {/* Mini audio player bar — fixed just above tab bar */}
-        {audioVerseKey && (
+        {/* Mini audio player bar — visible only when overlay is shown */}
+        {showOverlay && audioVerseKey && (
           <div
-            className={`fixed left-0 right-0 z-30 ${isDark ? 'bg-gray-900/95 border-gray-800' : 'bg-white/95 border-gray-200'} border-t backdrop-blur-xl`}
+            className={`fixed left-0 right-0 z-30 ${isDark ? 'bg-gray-900/70 border-gray-800/60' : 'bg-white/70 border-gray-200/60'} border-t backdrop-blur-xl`}
             style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 64px)' }}
           >
             {/* Progress line */}
@@ -2326,33 +2258,49 @@ export default function QuranReaderPage() {
               </div>
 
               {/* Récitateur */}
-              <div>
-                <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Récitateur</p>
-                <div className={`flex flex-col gap-1.5 rounded-xl p-1 border ${isDark ? 'bg-gray-800/50 border-gray-700/50' : 'bg-gray-100/80 border-gray-300/50'}`}>
-                  {([
-                    { id: 7, label: 'Mishari al-Afasy' },
-                    { id: 1, label: 'Abdul Basit' },
-                    { id: 6, label: 'Sudais' },
-                    { id: 8, label: 'Minshawi' },
-                  ] as { id: number; label: string }[]).map(({ id, label }) => (
-                    <button
-                      key={id}
-                      onClick={() => {
-                        setAudioReciterId(id);
-                        localStorage.setItem('quran-reciter-id', String(id));
-                        stopAudio();
-                      }}
-                      className={`px-3 py-2 rounded-lg text-sm font-medium transition-all text-left ${
-                        audioReciterId === id
-                          ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50'
-                          : isDark ? 'text-gray-400 hover:text-white hover:bg-gray-700/50' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/70'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              {(() => {
+                const reciters = [
+                  { id: 7, label: 'Mishari al-Afasy' },
+                  { id: 1, label: 'Abdul Basit' },
+                  { id: 6, label: 'Sudais' },
+                  { id: 8, label: 'Minshawi' },
+                ] as { id: number; label: string }[];
+                const current = reciters.find(r => r.id === audioReciterId);
+                return (
+                  <div>
+                    <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Récitateur</p>
+                    <div className="relative">
+                      <button
+                        onClick={() => setOpenDropdown(openDropdown === 'reciter' ? null : 'reciter')}
+                        className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
+                          isDark ? 'bg-gray-800/80 border-gray-700 text-white hover:border-gray-600' : 'bg-white border-gray-200 text-gray-900 hover:border-gray-300'
+                        }`}
+                      >
+                        <span>{current?.label ?? '—'}</span>
+                        <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${openDropdown === 'reciter' ? 'rotate-180' : ''} ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
+                      </button>
+                      {openDropdown === 'reciter' && (
+                        <div className={`absolute left-0 right-0 top-full mt-1 z-10 rounded-xl border shadow-xl overflow-hidden ${isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'}`}>
+                          {reciters.map(({ id, label }) => (
+                            <button
+                              key={id}
+                              onClick={() => { setAudioReciterId(id); localStorage.setItem('quran-reciter-id', String(id)); stopAudio(); setOpenDropdown(null); }}
+                              className={`w-full flex items-center justify-between px-4 py-3 text-sm transition-colors ${
+                                audioReciterId === id
+                                  ? isDark ? 'bg-emerald-600/20 text-emerald-400' : 'bg-emerald-50 text-emerald-700'
+                                  : isDark ? 'text-gray-300 hover:bg-gray-800' : 'text-gray-700 hover:bg-gray-50'
+                              }`}
+                            >
+                              <span>{label}</span>
+                              {audioReciterId === id && <Check className="h-4 w-4" />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Font Size */}
               <div>
@@ -2380,30 +2328,48 @@ export default function QuranReaderPage() {
               </div>
 
               {/* Typography */}
-              <div>
-                <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Typographie</p>
-                <div className={`flex flex-wrap gap-2 rounded-xl p-1 border ${isDark ? 'bg-gray-800/50 border-gray-700/50' : 'bg-gray-100/80 border-gray-300/50'}`}>
-                  {([
-                    { family: 'scheherazade' as FontFamily, label: 'Scheherazade' },
-                    { family: 'amiri' as FontFamily, label: 'Amiri Quran' },
-                    { family: 'noto' as FontFamily, label: 'Noto Naskh' },
-                    { family: 'v2' as FontFamily, label: 'QPC V2' },
-                    { family: 'v4' as FontFamily, label: 'QPC V4' },
-                  ] as { family: FontFamily; label: string }[]).map(({ family, label }) => (
-                    <button
-                      key={family}
-                      onClick={() => setFontFamily(family)}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                        fontFamily === family
-                          ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50'
-                          : isDark ? 'text-gray-400 hover:text-white hover:bg-gray-700/50' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/70'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              {(() => {
+                const fonts = [
+                  { family: 'scheherazade' as FontFamily, label: 'Scheherazade' },
+                  { family: 'amiri' as FontFamily, label: 'Amiri Quran' },
+                  { family: 'noto' as FontFamily, label: 'Noto Naskh' },
+                ] as { family: FontFamily; label: string }[];
+                const current = fonts.find(f => f.family === fontFamily);
+                return (
+                  <div>
+                    <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Typographie</p>
+                    <div className="relative">
+                      <button
+                        onClick={() => setOpenDropdown(openDropdown === 'font' ? null : 'font')}
+                        className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
+                          isDark ? 'bg-gray-800/80 border-gray-700 text-white hover:border-gray-600' : 'bg-white border-gray-200 text-gray-900 hover:border-gray-300'
+                        }`}
+                      >
+                        <span>{current?.label ?? '—'}</span>
+                        <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${openDropdown === 'font' ? 'rotate-180' : ''} ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
+                      </button>
+                      {openDropdown === 'font' && (
+                        <div className={`absolute left-0 right-0 top-full mt-1 z-10 rounded-xl border shadow-xl overflow-hidden ${isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'}`}>
+                          {fonts.map(({ family, label }) => (
+                            <button
+                              key={family}
+                              onClick={() => { setFontFamily(family); setOpenDropdown(null); }}
+                              className={`w-full flex items-center justify-between px-4 py-3 text-sm transition-colors ${
+                                fontFamily === family
+                                  ? isDark ? 'bg-emerald-600/20 text-emerald-400' : 'bg-emerald-50 text-emerald-700'
+                                  : isDark ? 'text-gray-300 hover:bg-gray-800' : 'text-gray-700 hover:bg-gray-50'
+                              }`}
+                            >
+                              <span>{label}</span>
+                              {fontFamily === family && <Check className="h-4 w-4" />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Tajweed Legend */}
               <div className={`pt-4 border-t ${isDark ? 'border-gray-800' : 'border-gray-200'}`}>
